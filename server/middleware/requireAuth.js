@@ -16,18 +16,16 @@ async function requireAuth(req, res, next) {
   try {
     const { data, error } = await supabase.auth.getUser(token);
     if (error || !data.user) {
-      console.error('requireAuth: getUser rejected token:', error?.message || 'no user', {
-        supabaseUrlSet: !!process.env.SUPABASE_URL,
-        supabaseKeySet: !!process.env.SUPABASE_ANON_KEY
+      console.error('requireAuth: getUser rejected token:', error?.message || 'no user', error?.cause, {
+        url: JSON.stringify(process.env.SUPABASE_URL)
       });
       return res.status(401).json({ error: 'Недействительный или истёкший токен' });
     }
     req.user = data.user;
     next();
   } catch (err) {
-    console.error('requireAuth: getUser threw:', err.message, {
-      supabaseUrlSet: !!process.env.SUPABASE_URL,
-      supabaseKeySet: !!process.env.SUPABASE_ANON_KEY
+    console.error('requireAuth: getUser threw:', err.message, err.cause, {
+      url: JSON.stringify(process.env.SUPABASE_URL)
     });
     res.status(401).json({ error: 'Не удалось проверить токен' });
   }
