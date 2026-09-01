@@ -1,7 +1,22 @@
 const express = require('express');
 const router = express.Router();
+const fs = require('fs');
+const PDFDocument = require('pdfkit');
 const db = require('../db/init');
 const { getOrderStats, getTodaysOrders, getUrgentOrders } = require('../services/orderProcessor');
+
+// Шрифт с поддержкой кириллицы для генерации PDF (встроенные шрифты pdfkit её не знают).
+// В репозиторий шрифт не кладём (лицензия Arial), а берём системный - Windows или Linux.
+// Если ни один путь не найден - пометим отсутствие, PDF-роут вернёт понятную ошибку.
+const CYRILLIC_FONT_CANDIDATES = [
+  process.env.PDF_FONT_PATH,
+  'C:\\Windows\\Fonts\\arial.ttf',
+  '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+  '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf'
+].filter(Boolean);
+const CYRILLIC_FONT_PATH = CYRILLIC_FONT_CANDIDATES.find(p => {
+  try { return fs.existsSync(p); } catch { return false; }
+});
 
 // GET /api/orders/products/suggest - Подсказки товаров для автодополнения поиска
 // Источник - каталог products (полный ассортимент), а не только то, что было в заказах
@@ -106,6 +121,114 @@ router.get('/by-sku', async (req, res, next) => {
     });
 
     res.json({ sku, count: orders.length, orders });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /api/orders/manifest?orderCodes=123,456 - Сводный PDF-манифест по списку заказов:
+// один файл со всеми заказами (по приоритету срочности), а не набор отдельных документов.
+// Это НЕ официальная накладная Kaspi со штрихкодом для курьера (её API не отдаёт, только
+// личный кабинет Kaspi по одной) - это внутренняя сводка для сборщика: что, куда и сколько.
+// ВАЖНО: этот GET-роут с одним сегментом пути должен быть объявлен ДО GET /:orderId ниже,
+// иначе Express примет "manifest" за значение параметра :orderId.
+router.get('/manifest', async (req, res, next) => {
+  try {
+    if (!CYRILLIC_FONT_PATH) {
+      return res.status(500).json({
+        error: 'Не найден шрифт с поддержкой кириллицы для PDF. Задайте PDF_FONT_PATH в .env (путь к .ttf-файлу).'
+      });
+    }
+
+    const orderCodes = (req.query.orderCodes || '')
+      .split(/[\s,;]+/)
+      .map(s => s.trim())
+      .filter(Boolean);
+
+    if (orderCodes.length === 0) {
+      return res.status(400).json({ error: 'orderCodes должен быть непустым списком' });
+    }
+
+    const orders = await loadOrdersWithSpaces(orderCodes);
+    if (orders.length === 0) {
+      return res.status(404).json({ error: 'Ни один из заказов не найден в базе' });
+    }
+
+    const totalSpaces = orders.reduce((sum, o) => sum + o.numberOfSpace, 0);
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="manifest_${Date.now()}.pdf"`);
+
+    const doc = new PDFDocument({ size: 'A4', margin: 40 });
+    doc.registerFont('main', CYRILLIC_FONT_PATH);
+    doc.font('main');
+    doc.pipe(res);
+
+    doc.fontSize(16).text('Сводный манифест по накладным', { align: 'center' });
+    doc.moveDown(0.3);
+    doc.fontSize(9).fillColor('#555')
+      .text(`Сформировано: ${new Date().toLocaleString('ru-RU')}`, { align: 'center' })
+      .text(`Заказов: ${orders.length}, всего мест: ${totalSpaces}`, { align: 'center' });
+    doc.fillColor('#000');
+    doc.moveDown(1);
+
+    const urgencyLabels = { overdue: 'Просрочено', today: 'Сегодня', soon: 'Скоро', upcoming: 'Предстоит' };
+
+    orders.forEach((order, idx) => {
+      if (idx > 0) doc.moveDown(1);
+
+      // Не разрывать блок заказа между страницами, если он не влезает целиком
+      const blockHeight = 70 + order.items.length * 16;
+      if (doc.y + blockHeight > doc.page.height - doc.page.margins.bottom) {
+        doc.addPage();
+      }
+
+      const leftX = doc.page.margins.left;
+      const rightEdge = doc.page.width - doc.page.margins.right;
+
+      doc.x = leftX;
+      doc.fontSize(13).fillColor('#000')
+        .text(`Заказ №${order.order_code}${order.store_name ? '  (' + order.store_name + ')' : ''}`, leftX, doc.y, { width: rightEdge - leftX });
+
+      doc.x = leftX;
+      doc.fontSize(10).fillColor('#000').text(
+        `Срочность: ${urgencyLabels[order.urgency] || order.urgency || '—'}` +
+        `   Доставка: ${order.delivery_date ? new Date(order.delivery_date).toLocaleDateString('ru-RU') : '—'}` +
+        `   Мест: ${order.numberOfSpace}`,
+        leftX, doc.y, { width: rightEdge - leftX }
+      );
+      doc.moveDown(0.3);
+
+      // Заголовок таблицы позиций (высота строки фиксирована, чтобы колонки не расходились по y)
+      const colX = { sku: leftX, name: leftX + 90, qty: leftX + 360, spaces: leftX + 420 };
+      const rowHeight = 14;
+      let rowY = doc.y;
+      doc.fontSize(9).fillColor('#555');
+      doc.text('Артикул', colX.sku, rowY, { width: 85, lineBreak: false });
+      doc.text('Товар', colX.name, rowY, { width: 265, lineBreak: false });
+      doc.text('Кол-во', colX.qty, rowY, { width: 55, lineBreak: false });
+      doc.text('Места', colX.spaces, rowY, { width: 55, lineBreak: false });
+      doc.fillColor('#000');
+      rowY += rowHeight;
+
+      order.items.forEach(item => {
+        const qty = Number(item.quantity) || 1;
+        const perUnit = Number(item.spacesPerUnit) || 1;
+        const itemSpaces = Math.max(Math.ceil(qty * perUnit), 1);
+        doc.fontSize(9);
+        doc.text(item.sku || '—', colX.sku, rowY, { width: 85, lineBreak: false, ellipsis: true });
+        doc.text(item.name || '—', colX.name, rowY, { width: 265, lineBreak: false, ellipsis: true });
+        doc.text(String(qty), colX.qty, rowY, { width: 55, lineBreak: false });
+        doc.text(String(itemSpaces), colX.spaces, rowY, { width: 55, lineBreak: false });
+        rowY += rowHeight;
+      });
+
+      doc.x = leftX;
+      doc.y = rowY + 6;
+      doc.moveTo(leftX, doc.y).lineTo(rightEdge, doc.y).strokeColor('#ccc').stroke();
+    });
+
+    doc.end();
   } catch (error) {
     next(error);
   }
@@ -370,7 +493,7 @@ async function loadOrdersWithSpaces(orderCodes) {
   const placeholders = orderCodes.map((_, i) => `$${i + 1}`).join(',');
   const found = await db.query(
     `SELECT o.id, o.store_id, o.kaspi_order_id, o.order_code, o.status, o.stage,
-            o.urgency, o.delivery_date,
+            o.urgency, o.delivery_date, s.name as store_name,
             COALESCE(
               json_agg(
                 json_build_object(
@@ -384,10 +507,11 @@ async function loadOrdersWithSpaces(orderCodes) {
               '[]'
             ) as items
      FROM orders o
+     LEFT JOIN stores s ON s.id = o.store_id
      LEFT JOIN order_items oi ON oi.order_id = o.id
      LEFT JOIN products p ON p.store_id = o.store_id AND p.sku = oi.sku
      WHERE o.order_code IN (${placeholders})
-     GROUP BY o.id`,
+     GROUP BY o.id, s.id`,
     orderCodes
   );
 

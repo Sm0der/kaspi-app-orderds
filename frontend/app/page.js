@@ -715,6 +715,28 @@ export default function Home() {
               <div style={{ marginBottom: '8px', fontWeight: 'bold' }}>
                 Готово: {assembleResults.succeeded} успешно, {assembleResults.failed} с ошибкой (из {assembleResults.total})
               </div>
+              {assembleResults.succeeded > 0 && (
+                <a
+                  href={`${API_URL}/api/orders/manifest?orderCodes=${assembleResults.results
+                    .filter(r => r.success)
+                    .map(r => r.order_code)
+                    .join(',')}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    display: 'inline-block',
+                    marginBottom: '12px',
+                    padding: '8px 16px',
+                    background: '#2e7d32',
+                    color: '#fff',
+                    borderRadius: '4px',
+                    textDecoration: 'none',
+                    fontWeight: 'bold'
+                  }}
+                >
+                  📄 Скачать сводный PDF по собранным заказам ({assembleResults.succeeded})
+                </a>
+              )}
               <ul style={{ margin: 0, paddingLeft: '20px' }}>
                 {assembleResults.results.map((r, idx) => (
                   <li key={idx} style={{ color: r.success ? '#2e7d32' : '#c62828', marginBottom: '4px' }}>
