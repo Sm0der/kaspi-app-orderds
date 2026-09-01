@@ -2,7 +2,7 @@
 const nextConfig = {
   reactStrictMode: true,
   env: {
-    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001',
+    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'https://kaspi-app-orderds-api.vercel.app',
     // Supabase URL и anon-ключ безопасно иметь как дефолт в коде - anon-ключ специально
     // предназначен светиться в браузере, реальный доступ к данным проверяется на бэкенде
     // (server/middleware/requireAuth.js). Это позволяет не настраивать Environment Variables
