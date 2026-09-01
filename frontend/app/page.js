@@ -8,10 +8,23 @@ import {
   isPushSubscribed,
   sendTestNotification
 } from './utils/pushNotifications';
+import { supabase } from './lib/supabaseClient';
+import Login from './components/Login';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
-export default function Home() {
+// Прикладываем токен текущей сессии Supabase к каждому запросу к нашему API - интерсептор,
+// а не useEffect, чтобы не зависеть от порядка эффектов (иначе самый первый запрос при
+// монтировании дашборда мог бы уйти без заголовка, до того как эффект успеет его выставить).
+axios.interceptors.request.use(async (config) => {
+  const { data } = await supabase.auth.getSession();
+  if (data.session?.access_token) {
+    config.headers.Authorization = `Bearer ${data.session.access_token}`;
+  }
+  return config;
+});
+
+function Dashboard({ onLogout }) {
   const [summary, setSummary] = useState(null);
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -364,16 +377,32 @@ export default function Home() {
     <main>
       <div className="container">
         {/* Заголовок */}
-        <div style={{ padding: '24px 0', borderBottom: '1px solid #eee' }}>
-          <h1>📦 Kaspi Orders Dashboard</h1>
-          <p style={{ color: '#666', marginTop: '8px' }}>
-            Мониторинг заказов для отгрузки сегодня
-          </p>
-          {lastSyncTime && (
-            <p style={{ fontSize: '12px', color: '#999', marginTop: '4px' }}>
-              Последняя синхронизация: {lastSyncTime.toLocaleTimeString('ru-RU')}
+        <div style={{ padding: '24px 0', borderBottom: '1px solid #eee', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <div>
+            <h1>📦 Kaspi Orders Dashboard</h1>
+            <p style={{ color: '#666', marginTop: '8px' }}>
+              Мониторинг заказов для отгрузки сегодня
             </p>
-          )}
+            {lastSyncTime && (
+              <p style={{ fontSize: '12px', color: '#999', marginTop: '4px' }}>
+                Последняя синхронизация: {lastSyncTime.toLocaleTimeString('ru-RU')}
+              </p>
+            )}
+          </div>
+          <button
+            onClick={onLogout}
+            style={{
+              padding: '6px 12px',
+              background: '#f5f5f5',
+              border: '1px solid #ddd',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontSize: '13px',
+              color: '#555'
+            }}
+          >
+            🚪 Выйти
+          </button>
         </div>
 
         {/* Переключатель магазинов */}
@@ -1125,4 +1154,39 @@ export default function Home() {
       </div>
     </main>
   );
+}
+
+// Обёртка с авторизацией: пока не подтверждена активная сессия Supabase, дашборд
+// (со всеми заказами и товарами) не рендерится и не запрашивает данные с бэкенда.
+// Аккаунт создаётся вручную в Supabase Dashboard - см. components/Login.js.
+export default function Home() {
+  const [session, setSession] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      setSession(data.session);
+      setAuthLoading(false);
+    });
+
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, newSession) => {
+      setSession(newSession);
+    });
+
+    return () => listener.subscription.unsubscribe();
+  }, []);
+
+  if (authLoading) {
+    return (
+      <main style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <p style={{ color: '#666' }}>Загрузка...</p>
+      </main>
+    );
+  }
+
+  if (!session) {
+    return <Login />;
+  }
+
+  return <Dashboard onLogout={() => supabase.auth.signOut()} />;
 }

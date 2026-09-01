@@ -3,8 +3,8 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const orderRoutes = require('./routes/orders');
-const authRoutes = require('./routes/auth');
 const pushRoutes = require('./routes/push');
+const requireAuth = require('./middleware/requireAuth');
 const { initDB, query } = require('./db/init');
 const SyncService = require('./services/syncService');
 
@@ -16,18 +16,19 @@ app.use(helmet());
 app.use(cors());
 app.use(express.json());
 
-// Routes
-app.use('/api/auth', authRoutes);
-app.use('/api/orders', orderRoutes);
-app.use('/api/push', pushRoutes);
-
-// Health check
+// Health check - без авторизации, чтобы можно было проверить, что сервер жив
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+// Все заказы/товары - только для вошедших пользователей (см. middleware/requireAuth.js).
+// Вход по email+паролю через Supabase Auth настраивается на фронтенде (components/Login.js);
+// сами аккаунты создаются вручную в Supabase Dashboard - публичной регистрации нет.
+app.use('/api/orders', requireAuth, orderRoutes);
+app.use('/api/push', pushRoutes);
+
 // GET /api/stores - Список магазинов для переключателя
-app.get('/api/stores', async (req, res, next) => {
+app.get('/api/stores', requireAuth, async (req, res, next) => {
   try {
     const result = await query('SELECT id, name FROM stores ORDER BY name');
     res.json({ data: result.rows });
