@@ -2,7 +2,12 @@ const { Pool } = require('pg');
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+  // Побольше соединений в пуле - синхронизация теперь обрабатывает заказы параллельно
+  // (см. services/syncService.js), а в проде это Supabase Postgres через transaction pooler
+  // (PgBouncer), который сам мультиплексирует много логических соединений поверх немногих
+  // реальных - раздувать пул с нашей стороны безопасно.
+  max: 20
 });
 
 const schema = `
