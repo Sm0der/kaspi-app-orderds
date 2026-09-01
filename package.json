@@ -1,0 +1,21 @@
+{
+  "name": "kaspi-orders-app",
+  "version": "0.1.0",
+  "description": "Kaspi Marketplace Orders Monitoring App",
+  "main": "server/index.js",
+  "scripts": {
+    "dev": "concurrently \"npm run backend:dev\" \"npm run frontend:dev\"",
+    "backend:dev": "cd server && NODE_ENV=development nodemon index.js",
+    "backend:start": "cd server && NODE_ENV=production node index.js",
+    "frontend:dev": "cd frontend && npm run dev",
+    "frontend:build": "cd frontend && npm run build",
+    "test:api": "node scripts/test-kaspi-api.js"
+  },
+  "keywords": ["kaspi", "orders", "monitoring"],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "concurrently": "^8.0.0",
+    "nodemon": "^3.0.0"
+  }
+}
