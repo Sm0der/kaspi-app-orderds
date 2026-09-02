@@ -31,58 +31,55 @@ export default function Login() {
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      background: '#f5f5f5'
+      background: 'transparent'
     }}>
       <form
         onSubmit={handleSubmit}
+        className="card"
         style={{
-          background: '#fff',
           padding: '32px',
-          borderRadius: '8px',
-          boxShadow: '0 2px 12px rgba(0,0,0,0.1)',
           width: '100%',
           maxWidth: '340px'
         }}
       >
-        <h1 style={{ fontSize: '20px', marginBottom: '20px', textAlign: 'center' }}>
+        <h1 style={{ fontSize: '22px', marginBottom: '24px', textAlign: 'center' }}>
           📦 Kaspi Orders Dashboard
         </h1>
 
         <label style={{ display: 'block', marginBottom: '12px' }}>
-          <span style={{ display: 'block', marginBottom: '4px', fontSize: '13px', color: '#555' }}>Email</span>
+          <span style={{ display: 'block', marginBottom: '4px', fontSize: '13px', color: 'var(--text-dim)' }}>Email</span>
           <input
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             required
             autoFocus
-            style={{ width: '100%', padding: '8px', border: '1px solid #ccc', borderRadius: '4px' }}
+            style={{ width: '100%', padding: '8px', border: '1px solid var(--border)', borderRadius: '4px' }}
           />
         </label>
 
         <label style={{ display: 'block', marginBottom: '16px' }}>
-          <span style={{ display: 'block', marginBottom: '4px', fontSize: '13px', color: '#555' }}>Пароль</span>
+          <span style={{ display: 'block', marginBottom: '4px', fontSize: '13px', color: 'var(--text-dim)' }}>Пароль</span>
           <input
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             required
-            style={{ width: '100%', padding: '8px', border: '1px solid #ccc', borderRadius: '4px' }}
+            style={{ width: '100%', padding: '8px', border: '1px solid var(--border)', borderRadius: '4px' }}
           />
         </label>
 
         {error && (
-          <div style={{ color: '#c62828', fontSize: '13px', marginBottom: '12px' }}>{error}</div>
+          <div style={{ color: '#ff6b81', fontSize: '13px', marginBottom: '12px' }}>{error}</div>
         )}
 
         <button
           type="submit"
+          className="btn-primary"
           disabled={loading}
           style={{
             width: '100%',
             padding: '10px',
-            background: '#1a73e8',
-            color: '#fff',
             border: 'none',
             borderRadius: '4px',
             fontWeight: 'bold',

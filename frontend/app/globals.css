@@ -8,14 +8,57 @@ html {
   font-size: 16px;
 }
 
+:root {
+  --bg-deep: #04050f;
+  --bg-nebula1: #0d0b2b;
+  --bg-nebula2: #1a0f3d;
+  --panel: rgba(20, 18, 48, 0.65);
+  --panel-solid: #12102e;
+  --border: rgba(140, 160, 255, 0.18);
+  --border-strong: rgba(140, 160, 255, 0.35);
+  --text: #e6e6ff;
+  --text-dim: #9aa0c8;
+  --text-dimmer: #6f76a3;
+  --accent: #7dd3fc;       /* cyan */
+  --accent2: #c084fc;      /* purple */
+  --accent3: #f0abfc;      /* pink */
+  --glow: rgba(125, 211, 252, 0.35);
+}
+
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+  font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Roboto', 'Oxygen',
     'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background-color: #f5f5f5;
-  color: #333;
+  color: var(--text);
+  min-height: 100vh;
+
+  /* Тёмная туманность + звёздное поле (чисто CSS, без картинок) */
+  background-color: var(--bg-deep);
+  background-image:
+    radial-gradient(1px 1px at 10% 15%, #fff, transparent),
+    radial-gradient(1px 1px at 30% 70%, #fff, transparent),
+    radial-gradient(1.5px 1.5px at 50% 30%, #fff, transparent),
+    radial-gradient(1px 1px at 70% 80%, #fff, transparent),
+    radial-gradient(1px 1px at 85% 20%, #fff, transparent),
+    radial-gradient(1.5px 1.5px at 92% 55%, #fff, transparent),
+    radial-gradient(1px 1px at 15% 90%, #fff, transparent),
+    radial-gradient(1px 1px at 60% 10%, #fff, transparent),
+    radial-gradient(1px 1px at 40% 45%, #fff, transparent),
+    radial-gradient(1px 1px at 25% 55%, #fff, transparent),
+    radial-gradient(circle at 20% 20%, var(--bg-nebula2) 0%, transparent 45%),
+    radial-gradient(circle at 85% 15%, rgba(192, 132, 252, 0.18) 0%, transparent 40%),
+    radial-gradient(circle at 75% 85%, var(--bg-nebula1) 0%, transparent 50%),
+    radial-gradient(circle at 10% 90%, rgba(125, 211, 252, 0.12) 0%, transparent 45%);
+  background-attachment: fixed;
+  background-size: cover;
+  animation: twinkle 6s ease-in-out infinite alternate;
+}
+
+@keyframes twinkle {
+  0% { background-color: var(--bg-deep); }
+  100% { background-color: #05061a; }
 }
 
 .container {
@@ -24,40 +67,73 @@ body {
   padding: 0 16px;
 }
 
+h1 {
+  background: linear-gradient(90deg, var(--accent), var(--accent2) 60%, var(--accent3));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  letter-spacing: 0.5px;
+  text-shadow: 0 0 30px var(--glow);
+}
+
+h2, h3 {
+  color: var(--text);
+}
+
+p, span, div, label, li, td, th {
+  color: inherit;
+}
+
+a {
+  color: var(--accent);
+}
+
 button {
   cursor: pointer;
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   padding: 8px 16px;
   font-size: 14px;
-  transition: all 0.3s ease;
+  font-weight: 600;
+  transition: all 0.2s ease;
+  color: var(--text);
 }
 
 button:hover {
-  opacity: 0.9;
+  opacity: 0.92;
+  transform: translateY(-1px);
+  box-shadow: 0 0 16px var(--glow);
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+  transform: none;
+  box-shadow: none;
 }
 
 .btn-primary {
-  background-color: #007bff;
-  color: white;
+  background: linear-gradient(135deg, #2563eb, var(--accent2));
+  color: #f5f7ff;
 }
 
 .btn-danger {
-  background-color: #dc3545;
+  background: linear-gradient(135deg, #dc3545, #f0abfc);
   color: white;
 }
 
 .btn-success {
-  background-color: #28a745;
-  color: white;
+  background: linear-gradient(135deg, #16a34a, var(--accent));
+  color: #04120a;
 }
 
 .badge {
   display: inline-block;
-  padding: 4px 8px;
+  padding: 4px 10px;
   border-radius: 12px;
   font-size: 12px;
   font-weight: 600;
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.35);
 }
 
 .badge-urgent {
@@ -81,30 +157,40 @@ button:hover {
 }
 
 .card {
-  background: white;
-  border-radius: 8px;
+  background: var(--panel);
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--border);
+  border-radius: 12px;
   padding: 16px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
   margin-bottom: 16px;
 }
 
 .stat-box {
-  background: white;
-  border-radius: 8px;
+  background: var(--panel);
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--border);
+  border-radius: 12px;
   padding: 24px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
   text-align: center;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
+}
+
+.stat-box:hover {
+  border-color: var(--border-strong);
+  box-shadow: 0 4px 28px var(--glow);
 }
 
 .stat-number {
   font-size: 32px;
   font-weight: bold;
-  color: #007bff;
+  color: var(--accent);
+  text-shadow: 0 0 18px var(--glow);
 }
 
 .stat-label {
   font-size: 14px;
-  color: #666;
+  color: var(--text-dim);
   margin-top: 8px;
 }
 
@@ -114,18 +200,56 @@ button:hover {
 }
 
 .spinner {
-  border: 4px solid #f3f3f3;
-  border-top: 4px solid #007bff;
+  border: 4px solid rgba(140, 160, 255, 0.15);
+  border-top: 4px solid var(--accent);
   border-radius: 50%;
   width: 40px;
   height: 40px;
   animation: spin 1s linear infinite;
   margin: 0 auto;
+  box-shadow: 0 0 20px var(--glow);
 }
 
 @keyframes spin {
   0% { transform: rotate(0deg); }
   100% { transform: rotate(360deg); }
+}
+
+/* Инпуты/селекты/текстареа - тёмная тема поверх инлайновых стилей компонентов
+   (инлайн задаёт только border-color/padding, фон и текст остаются светлыми по умолчанию) */
+input, select, textarea {
+  background: rgba(8, 8, 28, 0.6) !important;
+  color: var(--text) !important;
+  border-color: var(--border) !important;
+  border-radius: 6px;
+}
+
+input::placeholder, textarea::placeholder {
+  color: var(--text-dimmer);
+}
+
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 12px var(--glow);
+}
+
+table {
+  color: var(--text);
+}
+
+thead tr, tbody tr {
+  border-color: var(--border) !important;
+}
+
+/* Выпадающий список подсказок товара */
+ul {
+  background: var(--panel-solid) !important;
+  border-color: var(--border) !important;
+}
+
+ul li:hover {
+  background: rgba(125, 211, 252, 0.12) !important;
 }
 
 @media (max-width: 768px) {

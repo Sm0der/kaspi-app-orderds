@@ -125,6 +125,9 @@ function transformKaspiOrder(kaspiOrder, storeId) {
     state: attributes.state, // NEW, SIGN_REQUIRED, PICKUP, DELIVERY, KASPI_DELIVERY, ARCHIVE
     stage,
     delivery_date: attributes.plannedDeliveryDate ? new Date(attributes.plannedDeliveryDate) : null,
+    // Дата фактического создания заказа в Kaspi (когда клиент оформил) - для фильтра
+    // "новые заказы за сегодня/вчера/месяц", в отличие от delivery_date (когда доставить).
+    order_date: attributes.creationDate ? new Date(attributes.creationDate) : null,
     urgency: needsMerchantAction ? classifyByUrgency(urgencyDeadline) : null,
     raw_data: kaspiOrder
   };

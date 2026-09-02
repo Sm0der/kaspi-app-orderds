@@ -24,14 +24,15 @@ class SyncService {
     // к БД, что особенно важно на serverless, где сеть до БД - основная часть задержки.
     // (xmax = 0) - стандартный postgres-трюк: true для только что вставленной строки.
     const upsert = await db.query(
-      `INSERT INTO orders (store_id, kaspi_order_id, order_code, status, state, stage, delivery_date, urgency, raw_data)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      `INSERT INTO orders (store_id, kaspi_order_id, order_code, status, state, stage, delivery_date, order_date, urgency, raw_data)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        ON CONFLICT (kaspi_order_id) DO UPDATE SET
          status = EXCLUDED.status, state = EXCLUDED.state, stage = EXCLUDED.stage,
          order_code = EXCLUDED.order_code, delivery_date = EXCLUDED.delivery_date,
+         order_date = COALESCE(orders.order_date, EXCLUDED.order_date),
          urgency = EXCLUDED.urgency, raw_data = EXCLUDED.raw_data, updated_at = NOW()
        RETURNING id, (xmax = 0) AS inserted`,
-      [order.store_id, order.kaspi_order_id, order.order_code, order.status, order.state, order.stage, order.delivery_date, order.urgency, JSON.stringify(order.raw_data)]
+      [order.store_id, order.kaspi_order_id, order.order_code, order.status, order.state, order.stage, order.delivery_date, order.order_date, order.urgency, JSON.stringify(order.raw_data)]
     );
     const orderId = upsert.rows[0].id;
     const isNew = upsert.rows[0].inserted;

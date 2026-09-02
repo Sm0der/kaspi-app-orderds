@@ -273,7 +273,7 @@ router.get('/assemble-preview', async (req, res, next) => {
 // GET /api/orders/summary - Получить сводку заказов (все активные + в доставке + недавно завершённые)
 router.get('/summary', async (req, res, next) => {
   try {
-    const { storeId, product, dateFrom, dateTo } = req.query;
+    const { storeId, product, dateFrom, dateTo, orderDateFrom, orderDateTo } = req.query;
 
     // Показываем незавершённые заказы (new/accepted/packed/shipping) всегда,
     // а завершённые/отменённые - только за последние 14 дней (глубина синка Kaspi)
@@ -293,6 +293,16 @@ router.get('/summary', async (req, res, next) => {
     if (dateTo) {
       params.push(dateTo);
       whereClauses.push(`o.delivery_date <= $${params.length}`);
+    }
+    // Фильтр по дате СОЗДАНИЯ заказа в Kaspi (order_date) - отдельно от даты доставки выше.
+    // Используется для "новых заказов за сегодня/вчера/месяц".
+    if (orderDateFrom) {
+      params.push(orderDateFrom);
+      whereClauses.push(`o.order_date >= $${params.length}`);
+    }
+    if (orderDateTo) {
+      params.push(orderDateTo);
+      whereClauses.push(`o.order_date < $${params.length}::date + INTERVAL '1 day'`);
     }
     if (product) {
       params.push(`%${product}%`);

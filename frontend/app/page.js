@@ -43,6 +43,38 @@ function Dashboard({ onLogout }) {
   const [productQueryInput, setProductQueryInput] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+
+  // Фильтр по дате СОЗДАНИЯ заказа в Kaspi ("сколько новых заказов сегодня/вчера/за месяц"),
+  // отдельно от фильтра "Доставить с/по" (delivery_date) выше.
+  const [createdPreset, setCreatedPreset] = useState('all'); // 'all' | 'today' | 'yesterday' | 'month' | 'custom'
+  const [createdFromCustom, setCreatedFromCustom] = useState('');
+  const [createdToCustom, setCreatedToCustom] = useState('');
+
+  const toISODate = (d) => d.toISOString().slice(0, 10);
+
+  // Вычислить [from, to] по выбранному пресету. 'all' -> нет фильтра (null, null).
+  const getCreatedRange = () => {
+    const today = new Date();
+    if (createdPreset === 'today') {
+      const iso = toISODate(today);
+      return [iso, iso];
+    }
+    if (createdPreset === 'yesterday') {
+      const y = new Date(today);
+      y.setDate(y.getDate() - 1);
+      const iso = toISODate(y);
+      return [iso, iso];
+    }
+    if (createdPreset === 'month') {
+      const first = new Date(today.getFullYear(), today.getMonth(), 1);
+      return [toISODate(first), toISODate(today)];
+    }
+    if (createdPreset === 'custom') {
+      return [createdFromCustom || null, createdToCustom || null];
+    }
+    return [null, null];
+  };
+
   const [productSuggestions, setProductSuggestions] = useState([]);
   const [showProductDropdown, setShowProductDropdown] = useState(false);
 
@@ -195,6 +227,10 @@ function Dashboard({ onLogout }) {
       if (dateFrom) params.dateFrom = dateFrom;
       if (dateTo) params.dateTo = dateTo;
 
+      const [createdFrom, createdTo] = getCreatedRange();
+      if (createdFrom) params.orderDateFrom = createdFrom;
+      if (createdTo) params.orderDateTo = createdTo;
+
       const response = await axios.get(`${API_URL}/api/orders/summary`, { params });
       setSummary(response.data);
       setOrders(response.data.orders || []);
@@ -291,7 +327,7 @@ function Dashboard({ onLogout }) {
 
     const interval = setInterval(fetchData, 5 * 60 * 1000);
     return () => clearInterval(interval);
-  }, [selectedStoreId, productQuery, dateFrom, dateTo]);
+  }, [selectedStoreId, productQuery, dateFrom, dateTo, createdPreset, createdFromCustom, createdToCustom]);
 
   const getUrgencyColor = (urgency) => {
     switch (urgency) {
@@ -377,14 +413,14 @@ function Dashboard({ onLogout }) {
     <main>
       <div className="container">
         {/* Заголовок */}
-        <div style={{ padding: '24px 0', borderBottom: '1px solid #eee', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div style={{ padding: '24px 0', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <div>
             <h1>📦 Kaspi Orders Dashboard</h1>
-            <p style={{ color: '#666', marginTop: '8px' }}>
+            <p style={{ color: 'var(--text-dim)', marginTop: '8px' }}>
               Мониторинг заказов для отгрузки сегодня
             </p>
             {lastSyncTime && (
-              <p style={{ fontSize: '12px', color: '#999', marginTop: '4px' }}>
+              <p style={{ fontSize: '12px', color: 'var(--text-dimmer)', marginTop: '4px' }}>
                 Последняя синхронизация: {lastSyncTime.toLocaleTimeString('ru-RU')}
               </p>
             )}
@@ -393,12 +429,12 @@ function Dashboard({ onLogout }) {
             onClick={onLogout}
             style={{
               padding: '6px 12px',
-              background: '#f5f5f5',
-              border: '1px solid #ddd',
+              background: 'var(--panel)',
+              border: '1px solid var(--border)',
               borderRadius: '4px',
               cursor: 'pointer',
               fontSize: '13px',
-              color: '#555'
+              color: 'var(--text-dim)'
             }}
           >
             🚪 Выйти
@@ -442,7 +478,7 @@ function Dashboard({ onLogout }) {
           alignItems: 'flex-end'
         }}>
           <div style={{ position: 'relative' }}>
-            <label style={{ display: 'block', fontSize: '12px', color: '#666', marginBottom: '4px' }}>
+            <label style={{ display: 'block', fontSize: '12px', color: 'var(--text-dim)', marginBottom: '4px' }}>
               Поиск по товару
             </label>
             <input
@@ -455,7 +491,7 @@ function Dashboard({ onLogout }) {
               autoComplete="off"
               style={{
                 padding: '8px 12px',
-                border: '1px solid #ccc',
+                border: '1px solid var(--border)',
                 borderRadius: '4px',
                 minWidth: '220px'
               }}
@@ -467,8 +503,8 @@ function Dashboard({ onLogout }) {
                 left: 0,
                 right: 0,
                 marginTop: '4px',
-                background: '#fff',
-                border: '1px solid #ccc',
+                background: 'var(--panel-solid)',
+                border: '1px solid var(--border)',
                 borderRadius: '4px',
                 maxHeight: '260px',
                 overflowY: 'auto',
@@ -490,8 +526,8 @@ function Dashboard({ onLogout }) {
                       cursor: 'pointer',
                       fontSize: '14px'
                     }}
-                    onMouseEnter={(e) => e.currentTarget.style.background = '#f5f5f5'}
-                    onMouseLeave={(e) => e.currentTarget.style.background = '#fff'}
+                    onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(125, 211, 252, 0.12)'}
+                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
                   >
                     {name}
                   </li>
@@ -500,25 +536,25 @@ function Dashboard({ onLogout }) {
             )}
           </div>
           <div>
-            <label style={{ display: 'block', fontSize: '12px', color: '#666', marginBottom: '4px' }}>
+            <label style={{ display: 'block', fontSize: '12px', color: 'var(--text-dim)', marginBottom: '4px' }}>
               Доставить с
             </label>
             <input
               type="date"
               value={dateFrom}
               onChange={(e) => setDateFrom(e.target.value)}
-              style={{ padding: '8px 12px', border: '1px solid #ccc', borderRadius: '4px' }}
+              style={{ padding: '8px 12px', border: '1px solid var(--border)', borderRadius: '4px' }}
             />
           </div>
           <div>
-            <label style={{ display: 'block', fontSize: '12px', color: '#666', marginBottom: '4px' }}>
+            <label style={{ display: 'block', fontSize: '12px', color: 'var(--text-dim)', marginBottom: '4px' }}>
               Доставить по
             </label>
             <input
               type="date"
               value={dateTo}
               onChange={(e) => setDateTo(e.target.value)}
-              style={{ padding: '8px 12px', border: '1px solid #ccc', borderRadius: '4px' }}
+              style={{ padding: '8px 12px', border: '1px solid var(--border)', borderRadius: '4px' }}
             />
           </div>
           {(productQueryInput || dateFrom || dateTo) && (
@@ -533,6 +569,75 @@ function Dashboard({ onLogout }) {
             >
               ✕ Сбросить фильтры
             </button>
+          )}
+        </div>
+
+        {/* Фильтр по дате СОЗДАНИЯ заказа - "сколько новых заказов сегодня/вчера/за месяц" */}
+        <div style={{
+          margin: '16px 0 0',
+          display: 'flex',
+          gap: '8px',
+          flexWrap: 'wrap',
+          alignItems: 'flex-end'
+        }}>
+          <div style={{ marginRight: '4px', alignSelf: 'center' }}>
+            <span style={{ fontSize: '12px', color: 'var(--text-dim)' }}>🆕 Новые заказы:</span>
+          </div>
+          {[
+            ['all', 'Свободная дата'],
+            ['today', 'Сегодня'],
+            ['yesterday', 'Вчера'],
+            ['month', 'Месяц']
+          ].map(([value, label]) => (
+            <button
+              key={value}
+              className="btn-primary"
+              onClick={() => setCreatedPreset(value)}
+              style={{ background: createdPreset === value ? 'var(--accent)' : '#ccc', color: createdPreset === value ? '#04050f' : '#333' }}
+            >
+              {label}
+            </button>
+          ))}
+          {createdPreset === 'custom' || createdPreset === 'all' ? null : null}
+          {createdPreset !== 'today' && createdPreset !== 'yesterday' && createdPreset !== 'month' && (
+            <>
+              <div>
+                <label style={{ display: 'block', fontSize: '12px', color: 'var(--text-dim)', marginBottom: '4px' }}>
+                  Создан с
+                </label>
+                <input
+                  type="date"
+                  value={createdFromCustom}
+                  onChange={(e) => { setCreatedFromCustom(e.target.value); setCreatedPreset('custom'); }}
+                  style={{ padding: '8px 12px', border: '1px solid var(--border)', borderRadius: '4px' }}
+                />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: '12px', color: 'var(--text-dim)', marginBottom: '4px' }}>
+                  Создан по
+                </label>
+                <input
+                  type="date"
+                  value={createdToCustom}
+                  onChange={(e) => { setCreatedToCustom(e.target.value); setCreatedPreset('custom'); }}
+                  style={{ padding: '8px 12px', border: '1px solid var(--border)', borderRadius: '4px' }}
+                />
+              </div>
+            </>
+          )}
+          {createdPreset !== 'all' && (
+            <button
+              className="btn-primary"
+              style={{ background: '#ccc', color: '#333' }}
+              onClick={() => { setCreatedPreset('all'); setCreatedFromCustom(''); setCreatedToCustom(''); }}
+            >
+              ✕ Сбросить
+            </button>
+          )}
+          {createdPreset !== 'all' && !loading && (
+            <span style={{ fontSize: '13px', color: 'var(--accent)', alignSelf: 'center', marginLeft: '4px' }}>
+              Найдено новых заказов: {orders.length}
+            </span>
           )}
         </div>
 
@@ -588,7 +693,7 @@ function Dashboard({ onLogout }) {
         {/* Поиск заказов по SKU */}
         <div className="card" style={{ margin: '0 0 24px' }}>
           <h2 style={{ marginBottom: '12px' }}>🔍 Найти заказы по артикулу (SKU)</h2>
-          <p style={{ color: '#666', fontSize: '14px', marginBottom: '12px' }}>
+          <p style={{ color: 'var(--text-dim)', fontSize: '14px', marginBottom: '12px' }}>
             Укажите артикул товара и правило упаковки: сколько штук помещается в одно место (для мелких
             товаров) или сколько мест занимает одна штука (для крупных/громоздких товаров).
             Система найдёт все ещё не отправленные заказы с этим товаром, отсортирует по срочности/дате
@@ -596,7 +701,7 @@ function Dashboard({ onLogout }) {
           </p>
           <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
             <div>
-              <label style={{ display: 'block', fontSize: '12px', color: '#666', marginBottom: '4px' }}>
+              <label style={{ display: 'block', fontSize: '12px', color: 'var(--text-dim)', marginBottom: '4px' }}>
                 SKU / артикул
               </label>
               <input
@@ -604,24 +709,24 @@ function Dashboard({ onLogout }) {
                 value={skuInput}
                 onChange={(e) => setSkuInput(e.target.value)}
                 placeholder="Например: 108268540"
-                style={{ padding: '8px 12px', border: '1px solid #ccc', borderRadius: '4px', minWidth: '200px' }}
+                style={{ padding: '8px 12px', border: '1px solid var(--border)', borderRadius: '4px', minWidth: '200px' }}
               />
             </div>
             <div>
-              <label style={{ display: 'block', fontSize: '12px', color: '#666', marginBottom: '4px' }}>
+              <label style={{ display: 'block', fontSize: '12px', color: 'var(--text-dim)', marginBottom: '4px' }}>
                 Правило упаковки
               </label>
               <select
                 value={packingMode}
                 onChange={(e) => setPackingMode(e.target.value)}
-                style={{ padding: '8px 12px', border: '1px solid #ccc', borderRadius: '4px' }}
+                style={{ padding: '8px 12px', border: '1px solid var(--border)', borderRadius: '4px' }}
               >
                 <option value="unitsPerSpace">Штук в 1 месте (мелкий товар)</option>
                 <option value="spacesPerUnit">Мест на 1 шт (крупный товар)</option>
               </select>
             </div>
             <div>
-              <label style={{ display: 'block', fontSize: '12px', color: '#666', marginBottom: '4px' }}>
+              <label style={{ display: 'block', fontSize: '12px', color: 'var(--text-dim)', marginBottom: '4px' }}>
                 {packingMode === 'unitsPerSpace' ? 'Штук в 1 месте' : 'Мест на 1 шт'}
               </label>
               <input
@@ -630,7 +735,7 @@ function Dashboard({ onLogout }) {
                 step="1"
                 value={packingValueInput}
                 onChange={(e) => setPackingValueInput(Math.max(1, parseInt(e.target.value) || 1))}
-                style={{ width: '80px', padding: '8px 12px', border: '1px solid #ccc', borderRadius: '4px' }}
+                style={{ width: '80px', padding: '8px 12px', border: '1px solid var(--border)', borderRadius: '4px' }}
               />
             </div>
             <button
@@ -643,7 +748,7 @@ function Dashboard({ onLogout }) {
             </button>
           </div>
           {skuSearchInfo && (
-            <p style={{ marginTop: '10px', fontSize: '14px', color: '#2e7d32' }}>
+            <p style={{ marginTop: '10px', fontSize: '14px', color: '#4ade80' }}>
               ✅ Найдено {skuSearchInfo.count} заказ(ов) с артикулом «{skuSearchInfo.sku}» — номера подставлены в поле ниже.
             </p>
           )}
@@ -652,7 +757,7 @@ function Dashboard({ onLogout }) {
         {/* Пакетное формирование накладных */}
         <div className="card" style={{ margin: '0 0 24px' }}>
           <h2 style={{ marginBottom: '12px' }}>📋 Сформировать накладные по списку</h2>
-          <p style={{ color: '#666', fontSize: '14px', marginBottom: '12px' }}>
+          <p style={{ color: 'var(--text-dim)', fontSize: '14px', marginBottom: '12px' }}>
             Вставьте номера заказов вручную (через пробел, запятую или с новой строки) — или заполните
             поле, найдя заказы по SKU выше. Система обработает их в порядке приоритета
             (просрочено → сегодня → скоро → остальные), а количество мест (коробок) для каждой
@@ -666,7 +771,7 @@ function Dashboard({ onLogout }) {
             style={{
               width: '100%',
               padding: '10px 12px',
-              border: '1px solid #ccc',
+              border: '1px solid var(--border)',
               borderRadius: '4px',
               fontFamily: 'inherit',
               fontSize: '14px',
@@ -698,13 +803,13 @@ function Dashboard({ onLogout }) {
           {assemblePreview && (
             <div style={{ marginTop: '16px', fontSize: '14px', overflowX: 'auto' }}>
               {assemblePreview.notFound.length > 0 && (
-                <div style={{ color: '#c62828', marginBottom: '8px' }}>
+                <div style={{ color: '#ff6b81', marginBottom: '8px' }}>
                   ⚠️ Не найдены в базе: {assemblePreview.notFound.join(', ')}
                 </div>
               )}
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
-                  <tr style={{ textAlign: 'left', borderBottom: '2px solid #eee' }}>
+                  <tr style={{ textAlign: 'left', borderBottom: '2px solid var(--border)' }}>
                     <th style={{ padding: '6px 8px' }}>#</th>
                     <th style={{ padding: '6px 8px' }}>Заказ</th>
                     <th style={{ padding: '6px 8px' }}>Срочность</th>
@@ -716,8 +821,8 @@ function Dashboard({ onLogout }) {
                 </thead>
                 <tbody>
                   {assemblePreview.orders.map((o, idx) => (
-                    <tr key={o.order_code} style={{ borderBottom: '1px solid #f0f0f0' }}>
-                      <td style={{ padding: '6px 8px', color: '#999' }}>{idx + 1}</td>
+                    <tr key={o.order_code} style={{ borderBottom: '1px solid var(--border)' }}>
+                      <td style={{ padding: '6px 8px', color: 'var(--text-dimmer)' }}>{idx + 1}</td>
                       <td style={{ padding: '6px 8px', fontWeight: 'bold' }}>#{o.order_code}</td>
                       <td style={{ padding: '6px 8px' }}>
                         <span className="badge" style={{ background: getUrgencyColor(o.urgency), color: '#fff', fontSize: '12px' }}>
@@ -729,7 +834,7 @@ function Dashboard({ onLogout }) {
                         {o.items.reduce((sum, i) => sum + (Number(i.quantity) || 1), 0)}
                       </td>
                       <td style={{ padding: '6px 8px', fontWeight: 'bold' }}>{o.numberOfSpace}</td>
-                      <td style={{ padding: '6px 8px', color: '#666' }}>
+                      <td style={{ padding: '6px 8px', color: 'var(--text-dim)' }}>
                         {o.items.map(i => `${i.name}${i.quantity > 1 ? ` ×${i.quantity}` : ''}`).join(', ') || '—'}
                       </td>
                     </tr>
@@ -768,7 +873,7 @@ function Dashboard({ onLogout }) {
               )}
               <ul style={{ margin: 0, paddingLeft: '20px' }}>
                 {assembleResults.results.map((r, idx) => (
-                  <li key={idx} style={{ color: r.success ? '#2e7d32' : '#c62828', marginBottom: '4px' }}>
+                  <li key={idx} style={{ color: r.success ? '#4ade80' : '#ff6b81', marginBottom: '4px' }}>
                     {r.success ? '✅' : '❌'} #{r.order_code}
                     {r.success
                       ? ` — ${r.numberOfSpace} мест${r.urgency ? `, ${getUrgencyLabel(r.urgency)}` : ''}`
@@ -782,8 +887,8 @@ function Dashboard({ onLogout }) {
 
         {error && (
           <div style={{
-            background: '#ffebee',
-            color: '#c62828',
+            background: 'rgba(220, 53, 69, 0.15)',
+            color: '#ff6b81',
             padding: '16px',
             borderRadius: '4px',
             marginBottom: '16px'
@@ -936,7 +1041,7 @@ function Dashboard({ onLogout }) {
                       key={store}
                       style={{
                         padding: '12px',
-                        background: '#f9f9f9',
+                        background: 'rgba(255, 255, 255, 0.05)',
                         borderRadius: '4px',
                         fontSize: '14px'
                       }}
@@ -1066,7 +1171,7 @@ function Dashboard({ onLogout }) {
                     }}>
                       <div>
                         <h3>Заказ #{order.order_code || order.kaspi_order_id}</h3>
-                        <p style={{ color: '#666', marginTop: '4px' }}>
+                        <p style={{ color: 'var(--text-dim)', marginTop: '4px' }}>
                           Магазин: {order.store_name}
                         </p>
                       </div>
@@ -1101,11 +1206,11 @@ function Dashboard({ onLogout }) {
                       fontSize: '14px'
                     }}>
                       <div>
-                        <span style={{ color: '#666' }}>Статус Kaspi:</span>
+                        <span style={{ color: 'var(--text-dim)' }}>Статус Kaspi:</span>
                         <div>{order.status} {order.state ? `/ ${order.state}` : ''}</div>
                       </div>
                       <div>
-                        <span style={{ color: '#666' }}>Дата доставки:</span>
+                        <span style={{ color: 'var(--text-dim)' }}>Дата доставки:</span>
                         <div>
                           {order.delivery_date
                             ? new Date(order.delivery_date).toLocaleDateString('ru-RU')
@@ -1113,7 +1218,7 @@ function Dashboard({ onLogout }) {
                         </div>
                       </div>
                       <div>
-                        <span style={{ color: '#666' }}>Товаров (шт.):</span>
+                        <span style={{ color: 'var(--text-dim)' }}>Товаров (шт.):</span>
                         <div>
                           {(order.items || []).reduce((sum, item) => sum + (Number(item.quantity) || 1), 0)}
                         </div>
@@ -1124,10 +1229,10 @@ function Dashboard({ onLogout }) {
                       <div style={{
                         marginTop: '12px',
                         paddingTop: '12px',
-                        borderTop: '1px solid #eee',
+                        borderTop: '1px solid var(--border)',
                         fontSize: '14px'
                       }}>
-                        <span style={{ color: '#666' }}>Товары:</span>
+                        <span style={{ color: 'var(--text-dim)' }}>Товары:</span>
                         <ul style={{ margin: '6px 0 0', paddingLeft: '20px' }}>
                           {order.items.map((item, idx) => (
                             <li key={idx}>
@@ -1148,7 +1253,7 @@ function Dashboard({ onLogout }) {
         {loading && (
           <div className="loading">
             <div className="spinner"></div>
-            <p style={{ marginTop: '16px', color: '#666' }}>Загрузка заказов...</p>
+            <p style={{ marginTop: '16px', color: 'var(--text-dim)' }}>Загрузка заказов...</p>
           </div>
         )}
       </div>
@@ -1179,7 +1284,7 @@ export default function Home() {
   if (authLoading) {
     return (
       <main style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <p style={{ color: '#666' }}>Загрузка...</p>
+        <p style={{ color: 'var(--text-dim)' }}>Загрузка...</p>
       </main>
     );
   }

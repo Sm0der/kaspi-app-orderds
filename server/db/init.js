@@ -137,6 +137,13 @@ async function initDB() {
     `);
     console.log('✓ Migration spaces_per_unit verified');
 
+    // Миграция: дата создания заказа в Kaspi (order_date) - отдельно от delivery_date
+    // (плановая дата доставки клиенту) и synced_at (когда мы сами его затянули в базу).
+    // Нужна для фильтра "новые заказы за сегодня/вчера/месяц".
+    await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS order_date TIMESTAMP`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_orders_order_date ON orders(order_date)`);
+    console.log('✓ Migration order_date verified');
+
     return pool;
   } catch (error) {
     console.error('Database initialization error:', error);
