@@ -380,6 +380,26 @@ function Dashboard({ onLogout }) {
     })
     .filter(o => !selectedStage || o.stage === selectedStage);
 
+  // Сводка товаров по текущему отфильтрованному списку заказов - сколько штук каждого
+  // товара суммарно (например, чтобы свериться с тем, что реально лежит в собранных
+  // коробках, когда выбран фильтр "Собран (ждёт курьера)").
+  const productsSummary = (() => {
+    const map = new Map();
+    for (const order of filteredOrders) {
+      for (const item of order.items || []) {
+        const key = item.sku || item.name;
+        const qty = Number(item.quantity) || 1;
+        if (!map.has(key)) {
+          map.set(key, { name: item.name, sku: item.sku, quantity: 0, ordersCount: 0 });
+        }
+        const entry = map.get(key);
+        entry.quantity += qty;
+        entry.ordersCount += 1;
+      }
+    }
+    return Array.from(map.values()).sort((a, b) => b.quantity - a.quantity);
+  })();
+
   // Клик по карточке статистики - переключает фильтр (повторный клик снимает его)
   // и прокручивает к списку заказов
   const toggleUrgencyFilter = (value) => {
@@ -1153,8 +1173,44 @@ function Dashboard({ onLogout }) {
               </button>
             </div>
 
-            {/* Список заказов */}
+            {/* Сводка товаров по текущему фильтру - удобно, когда выбран этап
+                "Собран (ждёт курьера)": видно, что и сколько реально должно лежать в коробках */}
             <div ref={ordersListRef}>
+            {productsSummary.length > 0 && (
+              <div className="card">
+                <h2 style={{ marginBottom: '12px' }}>
+                  📦 Товары в выбранных заказах
+                  {selectedStage ? ` — ${getStageLabel(selectedStage).replace(/^[^\s]+\s/, '')}` : ''}
+                  {' '}({filteredOrders.length} {filteredOrders.length === 1 ? 'заказ' : 'заказов'})
+                </h2>
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
+                    <thead>
+                      <tr style={{ textAlign: 'left', borderBottom: '2px solid var(--border)' }}>
+                        <th style={{ padding: '6px 8px' }}>Товар</th>
+                        <th style={{ padding: '6px 8px' }}>Артикул</th>
+                        <th style={{ padding: '6px 8px' }}>Кол-во, шт.</th>
+                        <th style={{ padding: '6px 8px' }}>В заказах</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {productsSummary.map((p, idx) => (
+                        <tr key={p.sku || p.name || idx} style={{ borderBottom: '1px solid var(--border)' }}>
+                          <td style={{ padding: '6px 8px' }}>{p.name || '—'}</td>
+                          <td style={{ padding: '6px 8px', color: 'var(--text-dim)' }}>{p.sku || '—'}</td>
+                          <td style={{ padding: '6px 8px', fontWeight: 'bold' }}>{p.quantity}</td>
+                          <td style={{ padding: '6px 8px', color: 'var(--text-dim)' }}>{p.ordersCount}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+            </div>
+
+            {/* Список заказов */}
+            <div>
               <h2 style={{ marginBottom: '16px' }}>Заказы ({filteredOrders.length})</h2>
               {filteredOrders.length === 0 ? (
                 <div className="card">
