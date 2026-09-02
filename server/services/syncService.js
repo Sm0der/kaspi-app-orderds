@@ -113,6 +113,27 @@ class SyncService {
 
       console.log(`📦 Received ${allOrders.length}${totalCount ? ` / ${totalCount}` : ''} orders from Kaspi`);
 
+      // Архивные заказы (доставлено/отменено) в Kaspi уже не поменяются - если такой заказ
+      // у нас уже сохранён в БД со всеми позициями, повторно тянуть его (запрос состава,
+      // upsert) на каждой синхронизации незачем. Kaspi всё равно отдаёт его в списке (фильтр
+      // только по дате создания, без "изменено с..."), но мы можем сразу отсеять то, что нам
+      // точно не нужно обновлять, одним batch-запросом в БД вместо N отдельных проверок.
+      const orderIds = allOrders.map(o => o.id);
+      const archivedCheck = orderIds.length > 0
+        ? await db.query(
+            `SELECT o.kaspi_order_id
+             FROM orders o
+             WHERE o.kaspi_order_id = ANY($1)
+               AND o.stage IN ('completed', 'cancelled')
+               AND EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = o.id)`,
+            [orderIds]
+          )
+        : { rows: [] };
+      const alreadyArchived = new Set(archivedCheck.rows.map(r => r.kaspi_order_id));
+      const ordersToProcess = allOrders.filter(o => !alreadyArchived.has(o.id));
+
+      console.log(`📥 Skipping ${alreadyArchived.size} already-archived orders, processing ${ordersToProcess.length}`);
+
       // Обрабатываем заказы параллельно (пул воркеров), а не строго по одному - на serverless
       // (Vercel) синхронизация ограничена по времени выполнения, и с тысячей+ заказов
       // последовательная обработка (запрос к Kaspi API за составом + несколько запросов в БД
@@ -120,13 +141,13 @@ class SyncService {
       // независим и идемпотентен (upsert), поэтому обрыв на середине не портит данные -
       // следующий запуск просто продолжит с того, что не успело обработаться.
       const CONCURRENCY = 15;
-      let syncedCount = 0;
+      let syncedCount = alreadyArchived.size;
       let errorCount = 0;
       let cursor = 0;
 
       const worker = async () => {
-        while (cursor < allOrders.length) {
-          const kaspiOrder = allOrders[cursor++];
+        while (cursor < ordersToProcess.length) {
+          const kaspiOrder = ordersToProcess[cursor++];
           try {
             await this.processOrder(kaspiOrder, storeId, kaspiService);
             syncedCount++;
@@ -137,7 +158,7 @@ class SyncService {
         }
       };
 
-      await Promise.all(Array.from({ length: Math.min(CONCURRENCY, allOrders.length) }, worker));
+      await Promise.all(Array.from({ length: Math.min(CONCURRENCY, ordersToProcess.length) }, worker));
 
       // Логировать результаты синхронизации
       await db.query(
