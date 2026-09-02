@@ -1,0 +1,19 @@
+name: Hourly Kaspi sync
+
+# Vercel Hobby план разрешает Cron Jobs только 1 раз в сутки (см. server/vercel.json),
+# поэтому почасовую синхронизацию делаем через бесплатный GitHub Actions - он просто
+# дёргает уже существующий защищённый эндпоинт /api/cron/sync на бэкенде.
+on:
+  schedule:
+    - cron: '0 * * * *'
+  workflow_dispatch: {}
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Kaspi sync
+        run: |
+          curl -sf -X GET "https://kaspi-app-orderds-api.vercel.app/api/cron/sync" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            -w "\nHTTP status: %{http_code}\n"
