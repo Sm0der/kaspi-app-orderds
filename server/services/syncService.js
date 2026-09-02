@@ -118,6 +118,10 @@ class SyncService {
       // upsert) на каждой синхронизации незачем. Kaspi всё равно отдаёт его в списке (фильтр
       // только по дате создания, без "изменено с..."), но мы можем сразу отсеять то, что нам
       // точно не нужно обновлять, одним batch-запросом в БД вместо N отдельных проверок.
+      // order_date IS NOT NULL тоже обязателен: иначе заказ, который уже архивный, но ещё
+      // ни разу не получал order_date (например добавили колонку после того, как он уже был
+      // синхронизирован), навсегда останется без даты создания - его же больше никогда не
+      // обработает processOrder(), который её проставляет.
       const orderIds = allOrders.map(o => o.id);
       const archivedCheck = orderIds.length > 0
         ? await db.query(
@@ -125,6 +129,7 @@ class SyncService {
              FROM orders o
              WHERE o.kaspi_order_id = ANY($1)
                AND o.stage IN ('completed', 'cancelled')
+               AND o.order_date IS NOT NULL
                AND EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = o.id)`,
             [orderIds]
           )
