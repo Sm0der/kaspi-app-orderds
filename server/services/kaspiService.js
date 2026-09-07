@@ -52,12 +52,13 @@ class KaspiService {
     const today = new Date();
     const fourteenDaysAgo = new Date(today.getTime() - 14 * 24 * 60 * 60 * 1000);
 
+    // include[orders]=user не запрашиваем: связанные данные (included) мы нигде не читаем,
+    // нужные поля клиента и так лежат в attributes.customer, а запрос с include медленнее.
     const data = await this.getWithRetry('/orders', {
       'page[number]': pageNumber,
       'page[size]': pageSize,
       'filter[orders][creationDate][$ge]': fourteenDaysAgo.getTime(),
-      'filter[orders][creationDate][$le]': today.getTime(),
-      'include[orders]': 'user'
+      'filter[orders][creationDate][$le]': today.getTime()
     }, `getOrders(page ${pageNumber})`);
 
     // Kaspi возвращает данные в формате JSON:API
