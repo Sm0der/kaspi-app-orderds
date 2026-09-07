@@ -1,6 +1,56 @@
+const crypto = require('crypto');
 const db = require('../db/init');
 const KaspiService = require('./kaspiService');
-const { transformKaspiOrder, transformOrderEntries, classifyByUrgency } = require('./orderProcessor');
+const { transformKaspiOrder, transformOrderEntries } = require('./orderProcessor');
+
+const KASPI_PAGE_SIZE = 100;
+// Страницы списка заказов тянем параллельно, но осторожно - Kaspi отдаёт 429 при напоре
+const PAGE_CONCURRENCY = 5;
+// Состав заказа запрашивается только для заказов, которых ещё нет в БД, - таких обычно единицы
+const ENTRIES_CONCURRENCY = 15;
+// Сколько строк отправляем в БД одним INSERT-ом. Главная статья расходов синка - не сами
+// запросы, а сетевая задержка до Postgres, поэтому один запрос на 100 строк несравнимо
+// дешевле, чем 100 запросов по строке.
+const DB_BATCH_SIZE = 100;
+
+function chunk(items, size) {
+  const out = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
+
+// Пул воркеров: выполняет fn для всех элементов, но не больше limit одновременно.
+// Ошибку первого упавшего элемента пробрасываем наверх, но только после того, как
+// остановятся все воркеры - иначе оставшиеся промисы падали бы уже "в никуда"
+// (unhandled rejection), пока Promise.all уже отверг общий результат.
+async function mapLimit(items, limit, fn) {
+  const results = new Array(items.length);
+  let cursor = 0;
+  let firstError = null;
+
+  const worker = async () => {
+    while (cursor < items.length) {
+      const index = cursor++;
+      try {
+        results[index] = await fn(items[index], index);
+      } catch (error) {
+        if (!firstError) firstError = error;
+        cursor = items.length; // продолжать разбор очереди уже незачем
+      }
+    }
+  };
+
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  if (firstError) throw firstError;
+  return results;
+}
+
+// Плейсхолдеры вида ($1,$2,$3),($4,$5,$6) для многострочного INSERT
+function buildPlaceholders(rowCount, columnCount) {
+  return Array.from({ length: rowCount }, (_, row) =>
+    `(${Array.from({ length: columnCount }, (_, col) => `$${row * columnCount + col + 1}`).join(',')})`
+  ).join(',');
+}
 
 class SyncService {
   constructor() {
@@ -15,72 +65,39 @@ class SyncService {
     };
   }
 
-  // Обработать один заказ: сохранить/обновить его и (если ещё не делали) подтянуть состав.
-  // Вынесено отдельно, чтобы syncStore мог гонять это параллельно пулом воркеров.
-  async processOrder(kaspiOrder, storeId, kaspiService) {
-    const order = transformKaspiOrder(kaspiOrder, storeId);
+  // Забрать весь список заказов из Kaspi. Первую страницу берём отдельно - из её meta
+  // узнаём общее количество и дальше тянем оставшиеся страницы параллельно, а не по одной
+  // (при ~1100 заказах это 11 последовательных запросов против 1 + пары параллельных волн).
+  async fetchAllOrders(kaspiService) {
+    const first = await kaspiService.service.getOrders(0, KASPI_PAGE_SIZE);
+    const firstPage = first.orders || [];
+    const orders = [...firstPage];
+    const totalCount = first.meta?.totalCount;
 
-    // Один запрос вместо "проверить существование, потом insert или update" - меньше round-trip'ов
-    // к БД, что особенно важно на serverless, где сеть до БД - основная часть задержки.
-    // (xmax = 0) - стандартный postgres-трюк: true для только что вставленной строки.
-    const upsert = await db.query(
-      `INSERT INTO orders (store_id, kaspi_order_id, order_code, status, state, stage, delivery_date, order_date, urgency, raw_data)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-       ON CONFLICT (kaspi_order_id) DO UPDATE SET
-         status = EXCLUDED.status, state = EXCLUDED.state, stage = EXCLUDED.stage,
-         order_code = EXCLUDED.order_code, delivery_date = EXCLUDED.delivery_date,
-         order_date = COALESCE(orders.order_date, EXCLUDED.order_date),
-         urgency = EXCLUDED.urgency, raw_data = EXCLUDED.raw_data, updated_at = NOW()
-       RETURNING id, (xmax = 0) AS inserted`,
-      [order.store_id, order.kaspi_order_id, order.order_code, order.status, order.state, order.stage, order.delivery_date, order.order_date, order.urgency, JSON.stringify(order.raw_data)]
-    );
-    const orderId = upsert.rows[0].id;
-    const isNew = upsert.rows[0].inserted;
-
-    if (isNew) {
-      console.log(`✨ New order: ${order.order_code || kaspiOrder.id}`);
-    }
-
-    // Товары запрашиваем отдельным вызовом один раз на заказ (состав заказа не меняется
-    // после оформления) - так со временем собирается полный каталог товаров магазина,
-    // не тратя лимит API на заказы, которые уже когда-то были синхронизированы
-    let hasItems = !isNew;
-    if (!isNew) {
-      const itemCheck = await db.query('SELECT 1 FROM order_items WHERE order_id = $1 LIMIT 1', [orderId]);
-      hasItems = itemCheck.rows.length > 0;
-    }
-
-    if (!hasItems) {
-      const entries = await kaspiService.service.getOrderEntries(kaspiOrder.id);
-      const items = transformOrderEntries(entries);
-      for (const item of items) {
-        await db.query(
-          `INSERT INTO order_items (order_id, product_code, sku, name, quantity, image_url, raw_data)
-           VALUES ($1, $2, $3, $4, $5, $6, $7)
-           ON CONFLICT (order_id, product_code) DO UPDATE SET
-             quantity = EXCLUDED.quantity,
-             image_url = EXCLUDED.image_url,
-             raw_data = EXCLUDED.raw_data`,
-          [orderId, item.product_code, item.sku, item.name, item.quantity, item.image_url, JSON.stringify(item.raw_data)]
+    if (typeof totalCount === 'number' && totalCount > 0) {
+      const totalPages = Math.ceil(totalCount / KASPI_PAGE_SIZE);
+      if (totalPages > 1) {
+        const pageNumbers = Array.from({ length: totalPages - 1 }, (_, i) => i + 1);
+        const pages = await mapLimit(pageNumbers, PAGE_CONCURRENCY, (pageNumber) =>
+          kaspiService.service.getOrders(pageNumber, KASPI_PAGE_SIZE)
         );
-
-        // Каталог товаров (один-ко-многим: товар -> позиции в заказах).
-        // Не трогаем товары, загруженные импортом ('import'), чтобы не затирать
-        // их эталонные данные данными из конкретного заказа.
-        if (item.sku) {
-          await db.query(
-            `INSERT INTO products (store_id, sku, name, image_url, source)
-             VALUES ($1, $2, $3, $4, 'order')
-             ON CONFLICT (store_id, sku) DO UPDATE SET
-               name = EXCLUDED.name,
-               image_url = COALESCE(products.image_url, EXCLUDED.image_url),
-               updated_at = NOW()
-             WHERE products.source = 'order'`,
-            [order.store_id, item.sku, item.name, item.image_url]
-          );
-        }
+        for (const page of pages) orders.push(...(page.orders || []));
       }
+      return { orders, totalCount };
     }
+
+    // Kaspi не прислал meta.totalCount - идём по страницам последовательно, пока не
+    // придёт неполная страница. Молча синхронизировать только первую сотню нельзя.
+    let pageNumber = 1;
+    let lastPageLength = firstPage.length;
+    while (lastPageLength === KASPI_PAGE_SIZE) {
+      const page = await kaspiService.service.getOrders(pageNumber++, KASPI_PAGE_SIZE);
+      const pageOrders = page.orders || [];
+      orders.push(...pageOrders);
+      lastPageLength = pageOrders.length;
+    }
+
+    return { orders, totalCount: orders.length };
   }
 
   // Синхронизировать заказы для одного магазина
@@ -90,92 +107,195 @@ class SyncService {
       throw new Error(`Store ${storeId} not configured`);
     }
 
+    const startedAt = Date.now();
     console.log(`\n🔄 Syncing store: ${kaspiService.name} (${storeId})`);
 
     try {
-      // Получить ВСЕ заказы из Kaspi API постранично (за 14 дней может быть >100 заказов)
-      const pageSize = 100;
-      let pageNumber = 0;
-      let allOrders = [];
-      let totalCount = null;
+      const { orders: fetchedOrders, totalCount } = await this.fetchAllOrders(kaspiService);
 
-      while (true) {
-        const ordersData = await kaspiService.service.getOrders(pageNumber, pageSize);
-        const pageOrders = ordersData.orders || [];
-        allOrders = allOrders.concat(pageOrders);
-        totalCount = ordersData.meta?.totalCount ?? totalCount;
+      // На всякий случай убираем дубли: один и тот же заказ не должен попасть в батч дважды -
+      // postgres не даст ON CONFLICT DO UPDATE тронуть одну строку два раза в одном запросе.
+      const uniqueOrders = [...new Map(
+        fetchedOrders.filter(o => o?.id).map(o => [o.id, o])
+      ).values()];
 
-        if (pageOrders.length < pageSize || allOrders.length >= (totalCount || allOrders.length)) {
-          break;
-        }
-        pageNumber++;
+      console.log(`📦 Received ${uniqueOrders.length}${totalCount ? ` / ${totalCount}` : ''} orders from Kaspi`);
+
+      // Одним запросом узнаём про все заказы сразу: есть ли они у нас, каким было содержимое
+      // (raw_hash) и подтянут ли состав. Раньше на это уходило по отдельному SELECT-у на заказ.
+      const existing = new Map();
+      if (uniqueOrders.length > 0) {
+        const known = await db.query(
+          `SELECT o.kaspi_order_id, o.id, o.raw_hash, o.urgency,
+                  (o.order_date IS NOT NULL) AS has_order_date,
+                  EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = o.id) AS has_items
+           FROM orders o
+           WHERE o.kaspi_order_id = ANY($1)`,
+          [uniqueOrders.map(o => o.id)]
+        );
+        for (const row of known.rows) existing.set(row.kaspi_order_id, row);
       }
 
-      console.log(`📦 Received ${allOrders.length}${totalCount ? ` / ${totalCount}` : ''} orders from Kaspi`);
+      // Kaspi отдаёт все заказы за 14 дней целиком - фильтра "изменённые с ..." у него нет.
+      // Поэтому отличаем изменившиеся сами: считаем хеш присланного JSON и сверяем с сохранённым.
+      // Между двумя синхронизациями реально меняются единицы заказов, остальные можно не трогать
+      // вообще - ни записи в БД, ни запроса состава. urgency сверяем отдельно: она зависит от
+      // текущей даты, а не от данных Kaspi (вчерашнее "предстоит" сегодня становится "сегодня").
+      const toUpsert = [];
+      const needItems = [];
+      let unchangedCount = 0;
 
-      // Архивные заказы (доставлено/отменено) в Kaspi уже не поменяются - если такой заказ
-      // у нас уже сохранён в БД со всеми позициями, повторно тянуть его (запрос состава,
-      // upsert) на каждой синхронизации незачем. Kaspi всё равно отдаёт его в списке (фильтр
-      // только по дате создания, без "изменено с..."), но мы можем сразу отсеять то, что нам
-      // точно не нужно обновлять, одним batch-запросом в БД вместо N отдельных проверок.
-      // order_date IS NOT NULL тоже обязателен: иначе заказ, который уже архивный, но ещё
-      // ни разу не получал order_date (например добавили колонку после того, как он уже был
-      // синхронизирован), навсегда останется без даты создания - его же больше никогда не
-      // обработает processOrder(), который её проставляет.
-      const orderIds = allOrders.map(o => o.id);
-      const archivedCheck = orderIds.length > 0
-        ? await db.query(
-            `SELECT o.kaspi_order_id
-             FROM orders o
-             WHERE o.kaspi_order_id = ANY($1)
-               AND o.stage IN ('completed', 'cancelled')
-               AND o.order_date IS NOT NULL
-               AND EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = o.id)`,
-            [orderIds]
-          )
-        : { rows: [] };
-      const alreadyArchived = new Set(archivedCheck.rows.map(r => r.kaspi_order_id));
-      const ordersToProcess = allOrders.filter(o => !alreadyArchived.has(o.id));
+      for (const kaspiOrder of uniqueOrders) {
+        const order = transformKaspiOrder(kaspiOrder, storeId);
+        // Сериализуем один раз: и на хеш, и (для изменившихся) на запись в raw_data
+        const rawJson = JSON.stringify(kaspiOrder);
+        const rawHash = crypto.createHash('md5').update(rawJson).digest('hex');
+        const prev = existing.get(order.kaspi_order_id);
 
-      console.log(`📥 Skipping ${alreadyArchived.size} already-archived orders, processing ${ordersToProcess.length}`);
+        const needsWrite = !prev
+          || prev.raw_hash !== rawHash
+          || prev.urgency !== order.urgency
+          || !prev.has_order_date;
+        const missingItems = !prev || !prev.has_items;
 
-      // Обрабатываем заказы параллельно (пул воркеров), а не строго по одному - на serverless
-      // (Vercel) синхронизация ограничена по времени выполнения, и с тысячей+ заказов
-      // последовательная обработка (запрос к Kaspi API за составом + несколько запросов в БД
-      // на каждый заказ) в это время физически не укладывается. Каждый заказ по-прежнему
-      // независим и идемпотентен (upsert), поэтому обрыв на середине не портит данные -
-      // следующий запуск просто продолжит с того, что не успело обработаться.
-      const CONCURRENCY = 15;
-      let syncedCount = alreadyArchived.size;
+        if (!needsWrite && !missingItems) {
+          unchangedCount++;
+          continue;
+        }
+        if (needsWrite) toUpsert.push({ order, rawHash, rawJson });
+        if (missingItems) needItems.push({ kaspiOrderId: order.kaspi_order_id, orderId: prev?.id ?? null });
+      }
+
+      console.log(`📥 Unchanged: ${unchangedCount}, to update: ${toUpsert.length}, need items: ${needItems.length}`);
+
+      // Пишем заказы пачками по DB_BATCH_SIZE строк за запрос
+      const idByKaspiId = new Map();
+      const ORDER_COLUMNS = 11;
+      for (const batch of chunk(toUpsert, DB_BATCH_SIZE)) {
+        const values = [];
+        for (const { order, rawHash, rawJson } of batch) {
+          values.push(
+            order.store_id, order.kaspi_order_id, order.order_code, order.status, order.state,
+            order.stage, order.delivery_date, order.order_date, order.urgency,
+            rawJson, rawHash
+          );
+        }
+
+        const upserted = await db.query(
+          `INSERT INTO orders (store_id, kaspi_order_id, order_code, status, state, stage,
+                               delivery_date, order_date, urgency, raw_data, raw_hash)
+           VALUES ${buildPlaceholders(batch.length, ORDER_COLUMNS)}
+           ON CONFLICT (kaspi_order_id) DO UPDATE SET
+             status = EXCLUDED.status, state = EXCLUDED.state, stage = EXCLUDED.stage,
+             order_code = EXCLUDED.order_code, delivery_date = EXCLUDED.delivery_date,
+             order_date = COALESCE(orders.order_date, EXCLUDED.order_date),
+             urgency = EXCLUDED.urgency, raw_data = EXCLUDED.raw_data,
+             raw_hash = EXCLUDED.raw_hash, updated_at = NOW()
+           RETURNING id, kaspi_order_id`,
+          values
+        );
+        for (const row of upserted.rows) idByKaspiId.set(row.kaspi_order_id, row.id);
+      }
+
+      // Состав заказа в Kaspi не меняется после оформления, поэтому запрашиваем его один раз
+      // за всю жизнь заказа - только для тех, у кого позиций в БД ещё нет.
       let errorCount = 0;
-      let cursor = 0;
+      const itemTargets = needItems
+        .map(target => ({ ...target, orderId: target.orderId ?? idByKaspiId.get(target.kaspiOrderId) ?? null }))
+        .filter(target => target.orderId);
 
-      const worker = async () => {
-        while (cursor < ordersToProcess.length) {
-          const kaspiOrder = ordersToProcess[cursor++];
-          try {
-            await this.processOrder(kaspiOrder, storeId, kaspiService);
-            syncedCount++;
-          } catch (error) {
-            errorCount++;
-            console.error(`❌ Error processing order ${kaspiOrder.id}:`, error.message);
+      const fetchedEntries = await mapLimit(itemTargets, ENTRIES_CONCURRENCY, async (target) => {
+        try {
+          const entries = await kaspiService.service.getOrderEntries(target.kaspiOrderId);
+          return { orderId: target.orderId, items: transformOrderEntries(entries) };
+        } catch (error) {
+          errorCount++;
+          console.error(`❌ Error fetching entries for ${target.kaspiOrderId}:`, error.message);
+          return null;
+        }
+      });
+
+      // Позиции и каталог товаров тоже пишем пачками. Дубли внутри пачки убираем заранее -
+      // ON CONFLICT DO UPDATE не может обновить одну и ту же строку дважды в одном запросе.
+      const itemRows = [];
+      const seenItems = new Set();
+      const productRows = new Map();
+
+      for (const result of fetchedEntries) {
+        if (!result) continue;
+        for (const item of result.items) {
+          const itemKey = `${result.orderId}|${item.product_code}`;
+          if (seenItems.has(itemKey)) continue;
+          seenItems.add(itemKey);
+          itemRows.push({ orderId: result.orderId, ...item });
+
+          if (item.sku) {
+            productRows.set(`${storeId}|${item.sku}`, { sku: item.sku, name: item.name, image_url: item.image_url });
           }
         }
-      };
+      }
 
-      await Promise.all(Array.from({ length: Math.min(CONCURRENCY, ordersToProcess.length) }, worker));
+      const ITEM_COLUMNS = 7;
+      for (const batch of chunk(itemRows, DB_BATCH_SIZE)) {
+        const values = [];
+        for (const item of batch) {
+          values.push(
+            item.orderId, item.product_code, item.sku, item.name,
+            item.quantity, item.image_url, JSON.stringify(item.raw_data)
+          );
+        }
+        await db.query(
+          `INSERT INTO order_items (order_id, product_code, sku, name, quantity, image_url, raw_data)
+           VALUES ${buildPlaceholders(batch.length, ITEM_COLUMNS)}
+           ON CONFLICT (order_id, product_code) DO UPDATE SET
+             quantity = EXCLUDED.quantity,
+             image_url = EXCLUDED.image_url,
+             raw_data = EXCLUDED.raw_data`,
+          values
+        );
+      }
 
-      // Логировать результаты синхронизации
+      // Каталог товаров (один товар -> много позиций в заказах). Товары, загруженные импортом
+      // ('import'), не трогаем, чтобы не затирать эталонные данные данными из заказа.
+      const PRODUCT_COLUMNS = 5;
+      for (const batch of chunk([...productRows.values()], DB_BATCH_SIZE)) {
+        const values = [];
+        for (const product of batch) {
+          values.push(storeId, product.sku, product.name, product.image_url, 'order');
+        }
+        await db.query(
+          `INSERT INTO products (store_id, sku, name, image_url, source)
+           VALUES ${buildPlaceholders(batch.length, PRODUCT_COLUMNS)}
+           ON CONFLICT (store_id, sku) DO UPDATE SET
+             name = EXCLUDED.name,
+             image_url = COALESCE(products.image_url, EXCLUDED.image_url),
+             updated_at = NOW()
+           WHERE products.source = 'order'`,
+          values
+        );
+      }
+
+      const durationMs = Date.now() - startedAt;
+      const syncedCount = uniqueOrders.length;
+      const message = `Synced ${syncedCount} orders in ${(durationMs / 1000).toFixed(1)}s ` +
+        `(updated ${toUpsert.length}, unchanged ${unchangedCount}, items for ${itemTargets.length})`;
+
       await db.query(
         `INSERT INTO sync_history (store_id, status, message, synced_count, error_count)
          VALUES ($1, $2, $3, $4, $5)`,
-        [storeId, 'success', `Synced from Kaspi API`, syncedCount, errorCount]
+        [storeId, 'success', message, syncedCount, errorCount]
       );
 
       this.services[storeId].lastSync = new Date();
 
-      console.log(`✓ Sync complete: ${syncedCount} synced, ${errorCount} errors`);
-      return { syncedCount, errorCount };
+      console.log(`✓ ${message}, errors ${errorCount}`);
+      return {
+        syncedCount,
+        errorCount,
+        updatedCount: toUpsert.length,
+        unchangedCount,
+        durationMs
+      };
     } catch (error) {
       console.error(`❌ Sync failed for store ${storeId}:`, error.message);
 
@@ -189,20 +309,22 @@ class SyncService {
     }
   }
 
-  // Синхронизировать все магазины
+  // Синхронизировать все магазины. Магазины независимы (свой токен, свои заказы), поэтому
+  // идут параллельно - общее время равно самому долгому магазину, а не их сумме.
   async syncAll() {
     console.log('\n🌍 Starting global sync...');
-    const results = {};
 
-    for (const [storeId, config] of Object.entries(this.services)) {
-      try {
-        results[storeId] = await this.syncStore(storeId);
-      } catch (error) {
-        results[storeId] = { error: error.message };
-      }
-    }
+    const entries = await Promise.all(
+      Object.keys(this.services).map(async (storeId) => {
+        try {
+          return [storeId, await this.syncStore(storeId)];
+        } catch (error) {
+          return [storeId, { error: error.message }];
+        }
+      })
+    );
 
-    return results;
+    return Object.fromEntries(entries);
   }
 
   // Запустить периодическую синхронизацию

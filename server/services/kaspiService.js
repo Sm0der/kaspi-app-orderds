@@ -17,56 +17,55 @@ class KaspiService {
     });
   }
 
-  // Получить список заказов с повторными попытками при ошибках
-  async getOrders(pageNumber = 0, pageSize = 50) {
+  // Выполнить GET с повторными попытками при 429 (лимит запросов) и 5xx.
+  // Общий для всех чтений: синхронизация ходит в Kaspi параллельно, и 429 здесь -
+  // обычное дело, его нельзя просто пробрасывать наверх (иначе заказ теряет данные
+  // до следующего запуска синхронизации).
+  async getWithRetry(url, params, label) {
     let attempt = 0;
 
     while (attempt < MAX_RETRIES) {
       try {
-        // Kaspi API требует фильтр по дате создания (макс 14 дней!)
-        const today = new Date();
-        const fourteenDaysAgo = new Date(today.getTime() - 14 * 24 * 60 * 60 * 1000);
-
-        // Kaspi API использует объединённый фильтр для всех активных заказов
-        const params = {
-          'page[number]': pageNumber,
-          'page[size]': pageSize,
-          'filter[orders][creationDate][$ge]': fourteenDaysAgo.getTime(),
-          'filter[orders][creationDate][$le]': today.getTime(),
-          'include[orders]': 'user'
-        };
-
-        console.log('📍 Kaspi API запрос (getOrders):', { params, baseURL: this.client.defaults.baseURL });
-
-        const response = await this.client.get('/orders', { params });
-
-        // Kaspi возвращает данные в формате JSON:API
-        return {
-          orders: response.data.data || [],
-          meta: response.data.meta || {},
-          included: response.data.included || []
-        };
+        const response = await this.client.get(url, params ? { params } : undefined);
+        return response.data;
       } catch (error) {
         attempt++;
+        const status = error.response?.status;
+        const retriable = status === 429 || status >= 500;
 
-        if (error.response?.status === 429) {
-          // Rate limit - подождать и повторить
-          const delay = RETRY_DELAY * attempt;
-          console.warn(`⚠️  Rate limit (429). Waiting ${delay}ms...`);
-          await new Promise(resolve => setTimeout(resolve, delay));
-        } else if (error.response?.status >= 500) {
-          // Server error - повторить
-          const delay = RETRY_DELAY * attempt;
-          console.warn(`⚠️  Server error ${error.response.status}. Retrying in ${delay}ms...`);
-          await new Promise(resolve => setTimeout(resolve, delay));
-        } else {
-          // Other error - не повторять
+        if (!retriable || attempt >= MAX_RETRIES) {
           throw error;
         }
+
+        const delay = RETRY_DELAY * attempt;
+        console.warn(`⚠️  ${label}: ${status === 429 ? 'rate limit (429)' : `server error ${status}`}. Retry in ${delay}ms...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
       }
     }
 
-    throw new Error(`Failed to fetch orders after ${MAX_RETRIES} attempts`);
+    throw new Error(`${label}: failed after ${MAX_RETRIES} attempts`);
+  }
+
+  // Получить список заказов с повторными попытками при ошибках
+  async getOrders(pageNumber = 0, pageSize = 50) {
+    // Kaspi API требует фильтр по дате создания (макс 14 дней!)
+    const today = new Date();
+    const fourteenDaysAgo = new Date(today.getTime() - 14 * 24 * 60 * 60 * 1000);
+
+    const data = await this.getWithRetry('/orders', {
+      'page[number]': pageNumber,
+      'page[size]': pageSize,
+      'filter[orders][creationDate][$ge]': fourteenDaysAgo.getTime(),
+      'filter[orders][creationDate][$le]': today.getTime(),
+      'include[orders]': 'user'
+    }, `getOrders(page ${pageNumber})`);
+
+    // Kaspi возвращает данные в формате JSON:API
+    return {
+      orders: data.data || [],
+      meta: data.meta || {},
+      included: data.included || []
+    };
   }
 
   // Получить заказы с фильтром по статусу (APPROVED_BY_BANK = нужно принять, ACCEPTED_BY_MERCHANT = принят)
@@ -114,13 +113,8 @@ class KaspiService {
 
   // Получить товары в заказе
   async getOrderEntries(orderId) {
-    try {
-      const response = await this.client.get(`/orders/${orderId}/entries`);
-      return response.data.data || [];
-    } catch (error) {
-      console.error(`Error fetching entries for order ${orderId}:`, error.message);
-      throw error;
-    }
+    const data = await this.getWithRetry(`/orders/${orderId}/entries`, null, `getOrderEntries(${orderId})`);
+    return data.data || [];
   }
 
   // Изменить статус заказа. По документации Kaspi это POST на /orders (не PATCH /orders/{id}),

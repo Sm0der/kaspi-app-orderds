@@ -144,6 +144,13 @@ async function initDB() {
     await pool.query(`CREATE INDEX IF NOT EXISTS idx_orders_order_date ON orders(order_date)`);
     console.log('✓ Migration order_date verified');
 
+    // Миграция: хеш присланного Kaspi JSON заказа. У Kaspi нет фильтра "изменённые с ...",
+    // он всегда отдаёт все заказы за 14 дней, поэтому изменившиеся мы вычисляем сами -
+    // сравнением хеша. Без этого каждая синхронизация переписывала все ~1300 заказов,
+    // хотя реально между запусками меняются единицы (см. services/syncService.js).
+    await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS raw_hash TEXT`);
+    console.log('✓ Migration raw_hash verified');
+
     return pool;
   } catch (error) {
     console.error('Database initialization error:', error);
