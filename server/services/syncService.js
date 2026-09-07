@@ -45,6 +45,15 @@ async function mapLimit(items, limit, fn) {
   return results;
 }
 
+// Kaspi при каждом запросе выдаёт новую подписанную ссылку на накладную
+// (attributes.kaspiDelivery.waybill) - сам заказ при этом не менялся. Если считать хеш
+// вместе с ней, "изменившимися" выглядят почти все отгруженные заказы (проверено: 82 из
+// 100 на двух запросах подряд). Поэтому из хеша её выкидываем; в raw_data она остаётся.
+// waybillNumber - другое поле, оно стабильное и значимое, его не трогаем.
+function hashableJson(kaspiOrder) {
+  return JSON.stringify(kaspiOrder, (key, value) => (key === 'waybill' ? undefined : value));
+}
+
 // Плейсхолдеры вида ($1,$2,$3),($4,$5,$6) для многострочного INSERT
 function buildPlaceholders(rowCount, columnCount) {
   return Array.from({ length: rowCount }, (_, row) =>
@@ -147,9 +156,7 @@ class SyncService {
 
       for (const kaspiOrder of uniqueOrders) {
         const order = transformKaspiOrder(kaspiOrder, storeId);
-        // Сериализуем один раз: и на хеш, и (для изменившихся) на запись в raw_data
-        const rawJson = JSON.stringify(kaspiOrder);
-        const rawHash = crypto.createHash('md5').update(rawJson).digest('hex');
+        const rawHash = crypto.createHash('md5').update(hashableJson(kaspiOrder)).digest('hex');
         const prev = existing.get(order.kaspi_order_id);
 
         const needsWrite = !prev
@@ -162,7 +169,8 @@ class SyncService {
           unchangedCount++;
           continue;
         }
-        if (needsWrite) toUpsert.push({ order, rawHash, rawJson });
+        // Полный JSON сериализуем только для тех, кого реально пишем
+        if (needsWrite) toUpsert.push({ order, rawHash, rawJson: JSON.stringify(kaspiOrder) });
         if (missingItems) needItems.push({ kaspiOrderId: order.kaspi_order_id, orderId: prev?.id ?? null });
       }
 
