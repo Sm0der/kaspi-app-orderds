@@ -114,43 +114,35 @@ CREATE INDEX IF NOT EXISTS idx_order_items_order_id ON order_items(order_id);
 CREATE INDEX IF NOT EXISTS idx_order_items_product_code ON order_items(product_code);
 CREATE INDEX IF NOT EXISTS idx_sync_history_store ON sync_history(store_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications(created_at);
+
+-- Миграция: spaces_per_unit вместо старого units_per_space (шт. в 1 месте).
+-- Переносим старые значения в новый формат: мест на 1 шт = 1 / units_per_space.
+ALTER TABLE products ADD COLUMN IF NOT EXISTS spaces_per_unit NUMERIC(10,4) DEFAULT 1;
+UPDATE products
+SET spaces_per_unit = ROUND(1.0 / units_per_space, 4)
+WHERE units_per_space IS NOT NULL AND units_per_space > 1 AND spaces_per_unit = 1;
+
+-- Миграция: дата создания заказа в Kaspi (order_date) - отдельно от delivery_date
+-- (плановая дата доставки клиенту) и synced_at (когда мы сами его затянули в базу).
+-- Нужна для фильтра "новые заказы за сегодня/вчера/месяц".
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS order_date TIMESTAMP;
+CREATE INDEX IF NOT EXISTS idx_orders_order_date ON orders(order_date);
+
+-- Миграция: хеш присланного Kaspi JSON заказа. У Kaspi нет фильтра "изменённые с ...",
+-- он всегда отдаёт все заказы за 14 дней, поэтому изменившиеся мы вычисляем сами -
+-- сравнением хеша. Без этого каждая синхронизация переписывала все ~1300 заказов,
+-- хотя реально между запусками меняются единицы (см. services/syncService.js).
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS raw_hash TEXT;
 `;
 
+// Схема и все миграции выполняются одним запросом, а не по одному на выражение.
+// Это происходит на каждом холодном старте функции, а до базы (Supabase в Токио) круг
+// занимает сотни миллисекунд - десяток отдельных запросов заметно задерживал и синк,
+// и первый ответ дашборду. Параметров здесь нет, поэтому весь скрипт уходит одним пакетом.
 async function initDB() {
   try {
-    // Test connection
-    const result = await pool.query('SELECT NOW()');
-    console.log('✓ Database connection established:', result.rows[0]);
-
-    // Create schema
     await pool.query(schema);
-    console.log('✓ Schema created/verified');
-
-    // Миграция: добавить spaces_per_unit, если таблица products уже существовала без него,
-    // и перенести старые значения units_per_space (шт. в 1 месте) в новый формат
-    // (места на 1 шт = 1 / units_per_space).
-    await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS spaces_per_unit NUMERIC(10,4) DEFAULT 1`);
-    await pool.query(`
-      UPDATE products
-      SET spaces_per_unit = ROUND(1.0 / units_per_space, 4)
-      WHERE units_per_space IS NOT NULL AND units_per_space > 1 AND spaces_per_unit = 1
-    `);
-    console.log('✓ Migration spaces_per_unit verified');
-
-    // Миграция: дата создания заказа в Kaspi (order_date) - отдельно от delivery_date
-    // (плановая дата доставки клиенту) и synced_at (когда мы сами его затянули в базу).
-    // Нужна для фильтра "новые заказы за сегодня/вчера/месяц".
-    await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS order_date TIMESTAMP`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_orders_order_date ON orders(order_date)`);
-    console.log('✓ Migration order_date verified');
-
-    // Миграция: хеш присланного Kaspi JSON заказа. У Kaspi нет фильтра "изменённые с ...",
-    // он всегда отдаёт все заказы за 14 дней, поэтому изменившиеся мы вычисляем сами -
-    // сравнением хеша. Без этого каждая синхронизация переписывала все ~1300 заказов,
-    // хотя реально между запусками меняются единицы (см. services/syncService.js).
-    await pool.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS raw_hash TEXT`);
-    console.log('✓ Migration raw_hash verified');
-
+    console.log('✓ Schema and migrations verified');
     return pool;
   } catch (error) {
     console.error('Database initialization error:', error);
