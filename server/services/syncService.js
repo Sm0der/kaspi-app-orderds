@@ -80,28 +80,58 @@ class SyncService {
   // Забрать весь список заказов из Kaspi. Первую страницу берём отдельно - из её meta
   // узнаём общее количество и дальше тянем оставшиеся страницы параллельно, а не по одной
   // (при ~1100 заказах это 11 последовательных запросов против 1 + пары параллельных волн).
-  async fetchAllOrders(kaspiService) {
-    const first = await kaspiService.service.getOrders(0, KASPI_PAGE_SIZE);
-    const firstPage = first.orders || [];
-    const orders = [...firstPage];
-    const totalCount = first.meta?.totalCount;
+  async fetchAllOrders(kaspiService, storeId) {
+    // Сколько всего страниц - известно только из meta первой страницы, но ждать её отдельно
+    // дорого: запрос к Kaspi занимает секунды, и это лишний последовательный шаг. Поэтому
+    // количество страниц предсказываем по своей же базе (число заказов за то же окно в 14
+    // дней) с запасом и запрашиваем их все разом. Запрос в БД рядом с функцией стоит
+    // миллисекунды, а экономит целый круг до Kaspi. Если не угадали - до-качиваем остаток.
+    const expected = await db.query(
+      `SELECT COUNT(*)::int AS count
+       FROM orders
+       WHERE store_id = $1 AND order_date >= NOW() - INTERVAL '14 days'`,
+      [storeId]
+    );
+    const expectedPages = Math.min(
+      PAGE_CONCURRENCY,
+      Math.max(1, Math.ceil((expected.rows[0].count + KASPI_PAGE_SIZE) / KASPI_PAGE_SIZE))
+    );
 
-    if (typeof totalCount === 'number' && totalCount > 0) {
+    const orders = [];
+    const seenPages = new Set();
+    let totalCount = null;
+
+    const loadPages = async (pageNumbers) => {
+      const pages = await mapLimit(pageNumbers, PAGE_CONCURRENCY, (pageNumber) =>
+        kaspiService.service.getOrders(pageNumber, KASPI_PAGE_SIZE)
+      );
+      pageNumbers.forEach((pageNumber, i) => {
+        seenPages.add(pageNumber);
+        orders.push(...(pages[i].orders || []));
+        if (pages[i].meta?.totalCount != null) totalCount = pages[i].meta.totalCount;
+      });
+    };
+
+    await loadPages(Array.from({ length: expectedPages }, (_, i) => i));
+
+    // Заказов оказалось больше, чем мы ожидали - добираем оставшиеся страницы
+    if (typeof totalCount === 'number') {
       const totalPages = Math.ceil(totalCount / KASPI_PAGE_SIZE);
-      if (totalPages > 1) {
-        const pageNumbers = Array.from({ length: totalPages - 1 }, (_, i) => i + 1);
-        const pages = await mapLimit(pageNumbers, PAGE_CONCURRENCY, (pageNumber) =>
-          kaspiService.service.getOrders(pageNumber, KASPI_PAGE_SIZE)
-        );
-        for (const page of pages) orders.push(...(page.orders || []));
+      while (seenPages.size < totalPages) {
+        const missing = [];
+        for (let p = 0; p < totalPages && missing.length < PAGE_CONCURRENCY; p++) {
+          if (!seenPages.has(p)) missing.push(p);
+        }
+        if (missing.length === 0) break;
+        await loadPages(missing);
       }
       return { orders, totalCount };
     }
 
-    // Kaspi не прислал meta.totalCount - идём по страницам последовательно, пока не
-    // придёт неполная страница. Молча синхронизировать только первую сотню нельзя.
-    let pageNumber = 1;
-    let lastPageLength = firstPage.length;
+    // Kaspi не прислал meta.totalCount - идём по страницам, пока не придёт неполная.
+    // Молча синхронизировать только то, что успели запросить, нельзя.
+    let pageNumber = seenPages.size;
+    let lastPageLength = KASPI_PAGE_SIZE;
     while (lastPageLength === KASPI_PAGE_SIZE) {
       const page = await kaspiService.service.getOrders(pageNumber++, KASPI_PAGE_SIZE);
       const pageOrders = page.orders || [];
@@ -123,7 +153,7 @@ class SyncService {
     console.log(`\n🔄 Syncing store: ${kaspiService.name} (${storeId})`);
 
     try {
-      const { orders: fetchedOrders, totalCount } = await this.fetchAllOrders(kaspiService);
+      const { orders: fetchedOrders, totalCount } = await this.fetchAllOrders(kaspiService, storeId);
 
       // На всякий случай убираем дубли: один и тот же заказ не должен попасть в батч дважды -
       // postgres не даст ON CONFLICT DO UPDATE тронуть одну строку два раза в одном запросе.
