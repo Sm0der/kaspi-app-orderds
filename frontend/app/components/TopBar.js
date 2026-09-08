@@ -52,6 +52,9 @@ export default function TopBar({
         <button data-active={mode === 'crm'} onClick={() => onModeChange('crm')}>
           CRM
         </button>
+        <button data-active={mode === 'archive'} onClick={() => onModeChange('archive')}>
+          Архив
+        </button>
       </div>
 
       <button className="btn" onClick={onSync} disabled={syncing} title="Забрать свежие данные из Kaspi">

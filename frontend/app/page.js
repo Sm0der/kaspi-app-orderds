@@ -7,6 +7,7 @@ import Login from './components/Login';
 import TopBar from './components/TopBar';
 import ShippingView from './components/ShippingView';
 import CrmBoard from './components/CrmBoard';
+import ArchiveView from './components/ArchiveView';
 import AccessPanel from './components/AccessPanel';
 
 const EMPTY_FILTERS = { product: '', dateFrom: '', dateTo: '', createdPreset: 'all' };
@@ -79,7 +80,7 @@ function Workspace({ onLogout }) {
   // Режим запоминаем: человек, работающий в CRM, не должен каждое утро переключаться вручную
   useEffect(() => {
     const saved = window.localStorage.getItem('kaspi:mode');
-    if (saved === 'crm' || saved === 'shipping') setMode(saved);
+    if (['shipping', 'crm', 'archive'].includes(saved)) setMode(saved);
   }, []);
 
   const changeMode = (next) => {
@@ -165,7 +166,9 @@ function Workspace({ onLogout }) {
           <AccessPanel myEmail={me?.email} onClose={() => setAccessOpen(false)} />
         )}
 
-        {mode === 'shipping' ? (
+        {mode === 'archive' ? (
+          <ArchiveView />
+        ) : mode === 'shipping' ? (
           <ShippingView
             orders={orders}
             summary={summary}

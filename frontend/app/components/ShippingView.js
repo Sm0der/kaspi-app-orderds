@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { api, API_URL, errorText } from '../lib/api';
+import { api, downloadFile, errorText } from '../lib/api';
 import {
   STAGES, STAGE_ORDER, stageOf, urgencyOf,
   shipmentLabel, isShippingToday, formatMoney, totalQuantity
@@ -572,6 +572,27 @@ function AssemblePreview({ preview }) {
 
 function AssembleResults({ results }) {
   const ok = results.results.filter((r) => r.success);
+  const [busy, setBusy] = useState(null);
+  const [failure, setFailure] = useState(null);
+
+  // Документы отдаёт закрытый логином эндпоинт, поэтому забираем их запросом с токеном,
+  // а не ссылкой: по обычной ссылке браузер пришёл бы без заголовка и получил 401.
+  const grab = async (kind) => {
+    setBusy(kind);
+    setFailure(null);
+    try {
+      if (kind === 'pdf') {
+        const codes = ok.map((r) => r.order_code).join(',');
+        await downloadFile(`/api/orders/manifest?orderCodes=${codes}`, `Манифест_${Date.now()}.pdf`);
+      } else {
+        await downloadFile(`/api/batches/${results.batchId}/waybills.zip`, `Накладные_${results.batchId}.zip`);
+      }
+    } catch (err) {
+      setFailure(errorText(err, 'Не удалось скачать файл'));
+    } finally {
+      setBusy(null);
+    }
+  };
 
   return (
     <div style={{ marginTop: 18 }}>
@@ -580,16 +601,22 @@ function AssembleResults({ results }) {
       </div>
 
       {ok.length > 0 && (
-        <a
-          className="btn btn-primary"
-          href={`${API_URL}/api/orders/manifest?orderCodes=${ok.map((r) => r.order_code).join(',')}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          style={{ marginBottom: 14 }}
-        >
-          Скачать сводный PDF ({ok.length})
-        </a>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
+          <button
+            className="btn btn-primary"
+            disabled={busy === 'pdf'}
+            onClick={() => grab('pdf')}
+          >
+            {busy === 'pdf' && <span className="spinner" />} Сводный PDF ({ok.length})
+          </button>
+          {results.batchId && (
+            <button className="btn" disabled={busy === 'zip'} onClick={() => grab('zip')}>
+              {busy === 'zip' && <span className="spinner" />} Накладные Kaspi (ZIP)
+            </button>
+          )}
+        </div>
       )}
+      {failure && <div className="alert alert-error">{failure}</div>}
 
       <div style={{ display: 'grid', gap: 5, fontSize: 12.5 }}>
         {results.results.map((row, i) => (

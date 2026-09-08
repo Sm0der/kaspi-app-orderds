@@ -5,6 +5,7 @@ const helmet = require('helmet');
 const orderRoutes = require('./routes/orders');
 const crmRoutes = require('./routes/crm');
 const userRoutes = require('./routes/users');
+const batchRoutes = require('./routes/batches');
 const pushRoutes = require('./routes/push');
 const requireAuth = require('./middleware/requireAuth');
 const { initDB, query } = require('./db/init');
@@ -84,6 +85,7 @@ app.use((req, res, next) => {
 app.use('/api/orders', requireAuth, orderRoutes);
 app.use('/api/crm', requireAuth, crmRoutes);
 app.use('/api/users', requireAuth, userRoutes);
+app.use('/api/batches', requireAuth, batchRoutes);
 app.use('/api/push', pushRoutes);
 
 // GET /api/stores - Список магазинов для переключателя
