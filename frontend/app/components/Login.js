@@ -3,93 +3,67 @@
 import { useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
 
-// Экран входа. Аккаунт (email + пароль) создаётся вручную в Supabase Dashboard
-// (Authentication -> Users -> Add user) - публичной регистрации здесь нет специально,
-// чтобы попасть в приложение мог только тот, кому вы сами выдали доступ.
+// Экран входа. Аккаунт заводится вручную в панели Supabase (Authentication → Users),
+// публичной регистрации здесь нет специально: внутрь попадает только тот, кому выдали доступ.
 export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [busy, setBusy] = useState(false);
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const submit = async (event) => {
+    event.preventDefault();
     setError(null);
-    setLoading(true);
+    setBusy(true);
 
     const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
+    if (signInError) setError('Неверная почта или пароль');
 
-    if (signInError) {
-      setError('Неверный логин или пароль');
-    }
-    setLoading(false);
+    setBusy(false);
   };
 
   return (
-    <div style={{
-      minHeight: '100vh',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      background: 'transparent'
-    }}>
-      <form
-        onSubmit={handleSubmit}
-        className="card"
-        style={{
-          padding: '32px',
-          width: '100%',
-          maxWidth: '340px'
-        }}
-      >
-        <h1 style={{ fontSize: '22px', marginBottom: '24px', textAlign: 'center' }}>
-          📦 Kaspi Orders Dashboard
-        </h1>
+    <main className="auth">
+      <form className="panel auth-card rise" onSubmit={submit}>
+        <div className="auth-mark">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img className="mark-img" src="/brand/mark.webp" alt="" />
+          ARTROOM<span>/</span>OPS
+        </div>
+        <p className="eyebrow" style={{ marginBottom: 26 }}>Панель отгрузок Kaspi</p>
 
-        <label style={{ display: 'block', marginBottom: '12px' }}>
-          <span style={{ display: 'block', marginBottom: '4px', fontSize: '13px', color: 'var(--text-dim)' }}>Email</span>
+        <div className="field" style={{ marginBottom: 14 }}>
+          <label>Почта</label>
           <input
             type="email"
+            className="input"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             required
             autoFocus
-            style={{ width: '100%', padding: '8px', border: '1px solid var(--border)', borderRadius: '4px' }}
+            autoComplete="username"
           />
-        </label>
+        </div>
 
-        <label style={{ display: 'block', marginBottom: '16px' }}>
-          <span style={{ display: 'block', marginBottom: '4px', fontSize: '13px', color: 'var(--text-dim)' }}>Пароль</span>
+        <div className="field" style={{ marginBottom: 22 }}>
+          <label>Пароль</label>
           <input
             type="password"
+            className="input"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             required
-            style={{ width: '100%', padding: '8px', border: '1px solid var(--border)', borderRadius: '4px' }}
+            autoComplete="current-password"
           />
-        </label>
+        </div>
 
-        {error && (
-          <div style={{ color: '#ff6b81', fontSize: '13px', marginBottom: '12px' }}>{error}</div>
-        )}
+        {error && <div className="alert alert-error" style={{ marginBottom: 16 }}>{error}</div>}
 
-        <button
-          type="submit"
-          className="btn-primary"
-          disabled={loading}
-          style={{
-            width: '100%',
-            padding: '10px',
-            border: 'none',
-            borderRadius: '4px',
-            fontWeight: 'bold',
-            cursor: loading ? 'default' : 'pointer',
-            opacity: loading ? 0.7 : 1
-          }}
-        >
-          {loading ? 'Входим...' : 'Войти'}
+        <button type="submit" className="btn btn-primary" disabled={busy} style={{ width: '100%', justifyContent: 'center' }}>
+          {busy && <span className="spinner" />}
+          {busy ? 'Проверяем' : 'Войти'}
         </button>
       </form>
-    </div>
+    </main>
   );
 }

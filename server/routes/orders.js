@@ -312,8 +312,17 @@ router.get('/summary', async (req, res, next) => {
       )`);
     }
 
+    // Отдаём только нужные колонки, без raw_data: полный JSON заказа весит пару килобайт,
+    // на 1300 заказов это лишние мегабайты в каждом ответе дашборду. Нужные из него поля
+    // (город, сумма, плановая дата передачи курьеру) достаём здесь же.
     const result = await db.query(`
-      SELECT o.*, s.name as store_name,
+      SELECT o.id, o.store_id, o.kaspi_order_id, o.order_code, o.status, o.state, o.stage,
+        o.delivery_date, o.order_date, o.urgency, o.crm_status_id, o.updated_at,
+        s.name as store_name,
+        (o.raw_data->'attributes'->'deliveryAddress'->>'town') AS town,
+        (o.raw_data->'attributes'->>'totalPrice')::numeric AS total_price,
+        (o.raw_data->'attributes'->'kaspiDelivery'->>'courierTransmissionPlanningDate')::bigint AS shipment_plan_ms,
+        (o.raw_data->'attributes'->>'assembled')::boolean AS assembled,
         COALESCE(
           json_agg(
             json_build_object('name', oi.name, 'quantity', oi.quantity, 'sku', oi.sku, 'imageUrl', oi.image_url)

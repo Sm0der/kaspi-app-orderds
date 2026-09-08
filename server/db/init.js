@@ -133,6 +133,34 @@ CREATE INDEX IF NOT EXISTS idx_orders_order_date ON orders(order_date);
 -- сравнением хеша. Без этого каждая синхронизация переписывала все ~1300 заказов,
 -- хотя реально между запусками меняются единицы (см. services/syncService.js).
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS raw_hash TEXT;
+
+-- Внутренние статусы компании (CRM-режим) - своя воронка работы поверх статусов Kaspi.
+-- Пользователь переименовывает, добавляет и удаляет их прямо в интерфейсе, поэтому это
+-- таблица, а не список в коде. Заказ ссылается на статус; при удалении статуса заказы
+-- не пропадают, а просто остаются без внутреннего статуса.
+CREATE TABLE IF NOT EXISTS crm_statuses (
+  id SERIAL PRIMARY KEY,
+  name VARCHAR(100) NOT NULL,
+  color VARCHAR(20) NOT NULL DEFAULT '#8A8177',
+  position INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS crm_status_id INTEGER
+  REFERENCES crm_statuses(id) ON DELETE SET NULL;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS crm_status_changed_at TIMESTAMP;
+CREATE INDEX IF NOT EXISTS idx_orders_crm_status ON orders(crm_status_id);
+
+-- Стартовый набор колонок доски - только если пользователь ещё ничего не заводил
+INSERT INTO crm_statuses (name, color, position)
+SELECT * FROM (VALUES
+  ('Новый',       '#6E93B8', 1),
+  ('В работе',    '#D6A756', 2),
+  ('Собран',      '#7FA07F', 3),
+  ('Отгружен',    '#5F7D8C', 4),
+  ('Проблемный',  '#E0524A', 5)
+) AS seed(name, color, position)
+WHERE NOT EXISTS (SELECT 1 FROM crm_statuses);
 `;
 
 // Схема и все миграции выполняются одним запросом, а не по одному на выражение.
