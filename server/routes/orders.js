@@ -3,6 +3,7 @@ const router = express.Router();
 const fs = require('fs');
 const PDFDocument = require('pdfkit');
 const db = require('../db/init');
+const { requireAdmin } = require('../middleware/requireAuth');
 const { getOrderStats, getTodaysOrders, getUrgentOrders } = require('../services/orderProcessor');
 
 // Шрифт с поддержкой кириллицы для генерации PDF (встроенные шрифты pdfkit её не знают).
@@ -57,7 +58,7 @@ router.get('/products/suggest', async (req, res, next) => {
 // spacesPerUnit < 1 - мелкий товар, несколько штук в 1 месте (например 0.1 = 10 шт в 1 месте).
 // spacesPerUnit >= 1 - крупный/громоздкий товар, 1 шт занимает несколько мест (например 4 = 4 места на 1 шт).
 // Если storeId не указан - правило применяется ко всем товарам с этим SKU во всех магазинах.
-router.put('/products/packing', async (req, res, next) => {
+router.put('/products/packing', requireAdmin, async (req, res, next) => {
   try {
     const { sku, spacesPerUnit, storeId } = req.body;
 

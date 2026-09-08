@@ -151,6 +151,16 @@ ALTER TABLE orders ADD COLUMN IF NOT EXISTS crm_status_id INTEGER
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS crm_status_changed_at TIMESTAMP;
 CREATE INDEX IF NOT EXISTS idx_orders_crm_status ON orders(crm_status_id);
 
+-- Роли пользователей. Здесь перечислены исключения: кто не указан - администратор,
+-- а менеджеров владелец добавляет явно (см. middleware/requireAuth.js).
+CREATE TABLE IF NOT EXISTS app_users (
+  id SERIAL PRIMARY KEY,
+  email VARCHAR(255) NOT NULL UNIQUE,
+  role VARCHAR(20) NOT NULL DEFAULT 'manager' CHECK (role IN ('admin', 'manager')),
+  note VARCHAR(200),
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
 -- Стартовый набор колонок доски - только если пользователь ещё ничего не заводил
 INSERT INTO crm_statuses (name, color, position)
 SELECT * FROM (VALUES

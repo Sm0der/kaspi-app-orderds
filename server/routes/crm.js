@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db/init');
+const { requireAdmin } = require('../middleware/requireAuth');
 
 // Статусы внутренней воронки компании (колонки канбан-доски). Их набор задаёт сам
 // пользователь в интерфейсе, поэтому здесь обычный CRUD, а не захардкоженный список.
@@ -23,7 +24,7 @@ router.get('/statuses', async (req, res, next) => {
 });
 
 // POST /api/crm/statuses - добавить колонку
-router.post('/statuses', async (req, res, next) => {
+router.post('/statuses', requireAdmin, async (req, res, next) => {
   try {
     const name = (req.body.name || '').trim();
     const color = (req.body.color || '#8A8177').trim();
@@ -48,7 +49,7 @@ router.post('/statuses', async (req, res, next) => {
 });
 
 // PATCH /api/crm/statuses/:id - переименовать или перекрасить
-router.patch('/statuses/:id', async (req, res, next) => {
+router.patch('/statuses/:id', requireAdmin, async (req, res, next) => {
   try {
     const { name, color } = req.body;
     if (name === undefined && color === undefined) {
@@ -76,7 +77,7 @@ router.patch('/statuses/:id', async (req, res, next) => {
 });
 
 // PUT /api/crm/statuses/order - новый порядок колонок: { ids: [3, 1, 2] }
-router.put('/statuses/order', async (req, res, next) => {
+router.put('/statuses/order', requireAdmin, async (req, res, next) => {
   try {
     const ids = Array.isArray(req.body.ids) ? req.body.ids.map(Number).filter(Number.isInteger) : [];
     if (ids.length === 0) {
@@ -99,7 +100,7 @@ router.put('/statuses/order', async (req, res, next) => {
 });
 
 // DELETE /api/crm/statuses/:id - удалить колонку (заказы из неё остаются без статуса)
-router.delete('/statuses/:id', async (req, res, next) => {
+router.delete('/statuses/:id', requireAdmin, async (req, res, next) => {
   try {
     const result = await db.query('DELETE FROM crm_statuses WHERE id = $1 RETURNING id', [req.params.id]);
     if (result.rows.length === 0) {

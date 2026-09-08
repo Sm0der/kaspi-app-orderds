@@ -14,7 +14,7 @@ const TONE_COLOR = {
   faint: 'var(--text-faint)'
 };
 
-export default function ShippingView({ orders, summary, loading, filters, setFilters, storeId, onRefetch }) {
+export default function ShippingView({ orders, summary, loading, filters, setFilters, storeId, onRefetch, isAdmin }) {
   const [stage, setStage] = useState(null);
   const [urgency, setUrgency] = useState(null);
   const [expanded, setExpanded] = useState(null);
@@ -74,7 +74,7 @@ export default function ShippingView({ orders, summary, loading, filters, setFil
       // Правило упаковки приводим к единому виду «мест на 1 штуку»: для мелкого товара
       // это 1/значение (10 шт в месте → 0.1), для крупного — само значение (4 места на шт).
       const amount = Number(packingValue);
-      if (amount > 0) {
+      if (isAdmin && amount > 0) {
         const spacesPerUnit = packingMode === 'unitsPerSpace' ? 1 / amount : amount;
         try {
           await api.put('/api/orders/products/packing', {
@@ -316,31 +316,36 @@ export default function ShippingView({ orders, summary, loading, filters, setFil
           </div>
           <div className="panel-body">
             <p className="panel-note" style={{ marginBottom: 16 }}>
-              Укажите артикул и правило упаковки. Система найдёт все неотправленные заказы с этим
-              товаром, отсортирует по срочности и подставит номера в соседнюю панель.
+              {isAdmin
+                ? 'Укажите артикул и правило упаковки. Система найдёт все неотправленные заказы с этим товаром, отсортирует по срочности и подставит номера в соседнюю панель.'
+                : 'Укажите артикул. Система найдёт все неотправленные заказы с этим товаром по сохранённому правилу упаковки и подставит номера в соседнюю панель.'}
             </p>
             <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
               <div className="field" style={{ flex: '1 1 150px' }}>
                 <label>Артикул</label>
                 <input className="input mono" value={sku} onChange={(e) => setSku(e.target.value)} placeholder="108268540" />
               </div>
-              <div className="field" style={{ flex: '1 1 190px' }}>
-                <label>Правило упаковки</label>
-                <select className="select" value={packingMode} onChange={(e) => setPackingMode(e.target.value)}>
-                  <option value="unitsPerSpace">Штук в одном месте</option>
-                  <option value="spacesPerUnit">Мест на одну штуку</option>
-                </select>
-              </div>
-              <div className="field" style={{ width: 88 }}>
-                <label>Сколько</label>
-                <input
-                  type="number"
-                  min="1"
-                  className="input mono"
-                  value={packingValue}
-                  onChange={(e) => setPackingValue(Math.max(1, parseInt(e.target.value, 10) || 1))}
-                />
-              </div>
+              {isAdmin && (
+                <>
+                  <div className="field" style={{ flex: '1 1 190px' }}>
+                    <label>Правило упаковки</label>
+                    <select className="select" value={packingMode} onChange={(e) => setPackingMode(e.target.value)}>
+                      <option value="unitsPerSpace">Штук в одном месте</option>
+                      <option value="spacesPerUnit">Мест на одну штуку</option>
+                    </select>
+                  </div>
+                  <div className="field" style={{ width: 88 }}>
+                    <label>Сколько</label>
+                    <input
+                      type="number"
+                      min="1"
+                      className="input mono"
+                      value={packingValue}
+                      onChange={(e) => setPackingValue(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                    />
+                  </div>
+                </>
+              )}
               <button className="btn btn-primary" onClick={findBySku} disabled={skuBusy || !sku.trim()}>
                 {skuBusy && <span className="spinner" />} Найти
               </button>

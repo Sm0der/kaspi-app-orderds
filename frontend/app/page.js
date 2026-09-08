@@ -7,6 +7,7 @@ import Login from './components/Login';
 import TopBar from './components/TopBar';
 import ShippingView from './components/ShippingView';
 import CrmBoard from './components/CrmBoard';
+import AccessPanel from './components/AccessPanel';
 
 const EMPTY_FILTERS = { product: '', dateFrom: '', dateTo: '', createdPreset: 'all' };
 
@@ -70,6 +71,11 @@ function Workspace({ onLogout }) {
   const [syncing, setSyncing] = useState(false);
   const [lastSyncAt, setLastSyncAt] = useState(null);
 
+  // Роль решает, показывать ли настройки: правила упаковки, статусы воронки, доступы
+  const [me, setMe] = useState(null);
+  const [accessOpen, setAccessOpen] = useState(false);
+  const isAdmin = me?.role !== 'manager';
+
   // Режим запоминаем: человек, работающий в CRM, не должен каждое утро переключаться вручную
   useEffect(() => {
     const saved = window.localStorage.getItem('kaspi:mode');
@@ -82,6 +88,10 @@ function Workspace({ onLogout }) {
   };
 
   useEffect(() => {
+    api.get('/api/users/me')
+      .then(({ data }) => setMe(data))
+      .catch(() => setMe({ role: 'admin' }));
+
     api.get('/api/stores')
       .then(({ data }) => setStores(data.data || []))
       .catch(() => setStores([]));
@@ -144,10 +154,16 @@ function Workspace({ onLogout }) {
         lastSyncAt={lastSyncAt}
         onSync={runSync}
         onLogout={onLogout}
+        isAdmin={isAdmin}
+        onOpenAccess={() => setAccessOpen((open) => !open)}
       />
 
       <div className="shell">
         {error && <div className="alert alert-error">{error}</div>}
+
+        {accessOpen && isAdmin && (
+          <AccessPanel myEmail={me?.email} onClose={() => setAccessOpen(false)} />
+        )}
 
         {mode === 'shipping' ? (
           <ShippingView
@@ -158,9 +174,10 @@ function Workspace({ onLogout }) {
             setFilters={setFilters}
             storeId={storeId}
             onRefetch={fetchOrders}
+            isAdmin={isAdmin}
           />
         ) : (
-          <CrmBoard orders={orders} loading={loading} onOrdersChange={setOrders} />
+          <CrmBoard orders={orders} loading={loading} onOrdersChange={setOrders} isAdmin={isAdmin} />
         )}
       </div>
     </main>

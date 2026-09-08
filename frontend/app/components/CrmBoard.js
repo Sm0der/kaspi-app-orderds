@@ -17,7 +17,7 @@ const INBOX = { id: null, name: 'Без статуса', color: '#6E655A' };
 
 const PALETTE = ['#6E93B8', '#D6A756', '#7FA07F', '#5F7D8C', '#E0524A', '#A98BC4', '#E39A3B', '#7C736A'];
 
-export default function CrmBoard({ orders, loading, onOrdersChange }) {
+export default function CrmBoard({ orders, loading, onOrdersChange, isAdmin }) {
   const [statuses, setStatuses] = useState([]);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -144,15 +144,16 @@ export default function CrmBoard({ orders, loading, onOrdersChange }) {
         <div>
           <h1>Внутренняя воронка</h1>
           <p className="panel-note" style={{ marginTop: 4 }}>
-            Ваши статусы поверх статусов Kaspi. Карточки перетаскиваются мышью, колонки
-            переименовываются по клику на название.
+            {isAdmin
+              ? 'Ваши статусы поверх статусов Kaspi. Карточки перетаскиваются мышью, колонки переименовываются по клику на название.'
+              : 'Ваши статусы поверх статусов Kaspi. Перетаскивайте карточки мышью — набор колонок настраивает администратор.'}
           </p>
         </div>
         <div className="topbar-spacer" />
         <button className="chip" data-active={showDone} onClick={() => setShowDone(!showDone)}>
           Показывать завершённые
         </button>
-        <button className="btn" onClick={addStatus} disabled={busy}>+ Статус</button>
+        {isAdmin && <button className="btn" onClick={addStatus} disabled={busy}>+ Статус</button>}
       </div>
 
       {error && <div className="alert alert-error">{error}</div>}
@@ -191,7 +192,7 @@ export default function CrmBoard({ orders, loading, onOrdersChange }) {
                 <header className="column-head">
                   <span className="dot" style={{ background: column.color }} />
 
-                  {editing === column.id ? (
+                  {isAdmin && editing === column.id ? (
                     <input
                       className="input"
                       style={{ padding: '4px 8px', fontSize: 13 }}
@@ -210,9 +211,9 @@ export default function CrmBoard({ orders, loading, onOrdersChange }) {
                   ) : (
                     <span
                       className="column-title"
-                      onClick={() => !isInbox && setEditing(column.id)}
-                      style={{ cursor: isInbox ? 'default' : 'text' }}
-                      title={isInbox ? undefined : 'Нажмите, чтобы переименовать'}
+                      onClick={() => isAdmin && !isInbox && setEditing(column.id)}
+                      style={{ cursor: isAdmin && !isInbox ? 'text' : 'default' }}
+                      title={isAdmin && !isInbox ? 'Нажмите, чтобы переименовать' : undefined}
                     >
                       {column.name}
                     </span>
@@ -220,7 +221,7 @@ export default function CrmBoard({ orders, loading, onOrdersChange }) {
 
                   <span className="column-count">{cards.length}</span>
 
-                  {!isInbox && (
+                  {isAdmin && !isInbox && (
                     <div style={{ display: 'flex', gap: 2 }}>
                       <label className="btn btn-quiet btn-icon" title="Цвет" style={{ position: 'relative', overflow: 'hidden' }}>
                         <span aria-hidden="true">◐</span>

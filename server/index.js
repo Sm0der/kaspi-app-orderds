@@ -4,6 +4,7 @@ const cors = require('cors');
 const helmet = require('helmet');
 const orderRoutes = require('./routes/orders');
 const crmRoutes = require('./routes/crm');
+const userRoutes = require('./routes/users');
 const pushRoutes = require('./routes/push');
 const requireAuth = require('./middleware/requireAuth');
 const { initDB, query } = require('./db/init');
@@ -66,6 +67,7 @@ app.use((req, res, next) => {
 // Все заказы/товары - только для вошедших пользователей (см. middleware/requireAuth.js).
 app.use('/api/orders', requireAuth, orderRoutes);
 app.use('/api/crm', requireAuth, crmRoutes);
+app.use('/api/users', requireAuth, userRoutes);
 app.use('/api/push', pushRoutes);
 
 // GET /api/stores - Список магазинов для переключателя

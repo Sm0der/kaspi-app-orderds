@@ -9,7 +9,9 @@ export default function TopBar({
   syncing,
   lastSyncAt,
   onSync,
-  onLogout
+  onLogout,
+  isAdmin,
+  onOpenAccess
 }) {
   return (
     <header className="topbar">
@@ -61,6 +63,12 @@ export default function TopBar({
         <span className="eyebrow" title="Время последней синхронизации">
           {lastSyncAt.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
         </span>
+      )}
+
+      {isAdmin && (
+        <button className="btn btn-quiet btn-icon" onClick={onOpenAccess} title="Доступ сотрудников">
+          <span aria-hidden="true">⚙</span>
+        </button>
       )}
 
       <button className="btn btn-quiet btn-icon" onClick={onLogout} title="Выйти">
