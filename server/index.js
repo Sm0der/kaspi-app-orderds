@@ -28,7 +28,7 @@ let syncService = null;
 // Инициализация (подключение к БД, загрузка магазинов) выполняется один раз и кешируется
 // в промисе. Локально это происходит перед app.listen; на Vercel (serverless) отдельного
 // "старта" нет - каждый холодный старт функции ждёт этот же промис перед первым запросом.
-const ready = (async () => {
+async function initialize() {
   await initDB();
   console.log('✓ Database initialized');
 
@@ -55,13 +55,29 @@ const ready = (async () => {
   }
 
   app.locals.syncService = syncService;
-})();
+}
 
-ready.catch(err => console.error('Initialization error:', err));
+// Кешируем только удачную инициализацию. Запомнить отказ навсегда означало бы, что инстанс,
+// которому не повезло со стартом (секундная недоступность базы, дедлок при одновременном
+// старте двух функций), до самой своей смерти отвечает ошибкой на каждый запрос.
+let ready = null;
+
+function whenReady() {
+  if (!ready) {
+    ready = initialize().catch((error) => {
+      ready = null; // следующий запрос попробует ещё раз
+      throw error;
+    });
+  }
+  return ready;
+}
+
+// Прогреваем сразу, не дожидаясь первого запроса
+whenReady().catch(err => console.error('Initialization error:', err));
 
 // Дожидаемся готовности (БД + магазины) перед обработкой любого запроса, кроме /api/health выше
 app.use((req, res, next) => {
-  ready.then(() => next()).catch(next);
+  whenReady().then(() => next()).catch(next);
 });
 
 // Все заказы/товары - только для вошедших пользователей (см. middleware/requireAuth.js).
@@ -111,7 +127,7 @@ app.use((err, req, res, next) => {
 // Локальный запуск (node index.js / npm start) - на Vercel этот файл просто экспортирует app,
 // без собственного app.listen (это делает рантайм @vercel/node).
 if (require.main === module) {
-  ready.then(() => {
+  whenReady().then(() => {
     const server = app.listen(PORT, () => {
       console.log(`\n✓ Server running on http://localhost:${PORT}`);
       console.log(`✓ Dashboard: http://localhost:3000`);

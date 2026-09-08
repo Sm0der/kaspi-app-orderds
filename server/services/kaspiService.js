@@ -31,14 +31,19 @@ class KaspiService {
       } catch (error) {
         attempt++;
         const status = error.response?.status;
-        const retriable = status === 429 || status >= 500;
+        // Ответа может не быть вовсе: Kaspi иногда рвёт соединение (ECONNRESET) или
+        // не отвечает вовремя. Это ровно тот случай, когда повтор и нужен, а раньше
+        // такая ошибка проходила мимо ретраев и роняла синхронизацию всего магазина.
+        const networkFailure = !error.response;
+        const retriable = networkFailure || status === 429 || status >= 500;
 
         if (!retriable || attempt >= MAX_RETRIES) {
           throw error;
         }
 
         const delay = RETRY_DELAY * attempt;
-        console.warn(`⚠️  ${label}: ${status === 429 ? 'rate limit (429)' : `server error ${status}`}. Retry in ${delay}ms...`);
+        const reason = networkFailure ? (error.code || 'сеть') : status === 429 ? 'rate limit (429)' : `server error ${status}`;
+        console.warn(`⚠️  ${label}: ${reason}. Retry in ${delay}ms...`);
         await new Promise(resolve => setTimeout(resolve, delay));
       }
     }
