@@ -563,15 +563,15 @@ table.data tbody tr:last-child td { border-bottom: 0; }
   position: absolute;
   inset: 0;
   background: url('/brand/workshop.webp') center / cover no-repeat;
-  opacity: 0.5;
-  filter: saturate(0.8);
+  opacity: 0.66;
+  filter: saturate(0.9);
   animation: slow-zoom 40s ease-in-out infinite alternate;
 }
 .auth::after {
   content: '';
   position: absolute;
   inset: 0;
-  background: radial-gradient(760px 520px at 50% 48%, rgba(11, 10, 8, 0.5), rgba(11, 10, 8, 0.95) 72%);
+  background: radial-gradient(820px 560px at 50% 48%, rgba(11, 10, 8, 0.28), rgba(11, 10, 8, 0.92) 74%);
 }
 @keyframes slow-zoom {
   from { transform: scale(1); }
