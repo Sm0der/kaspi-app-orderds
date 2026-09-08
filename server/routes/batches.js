@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
-const { ZipArchive } = require('archiver');
+// archiver 7, а не 8: восьмая версия ESM-only, и рантайм Vercel её require() не принимает
+const archiver = require('archiver');
 const axios = require('axios');
 const db = require('../db/init');
 const { CYRILLIC_FONT_PATH, loadOrdersWithSpaces, renderManifest } = require('../services/orderDocs');
@@ -121,7 +122,7 @@ router.get('/:id/waybills.zip', async (req, res, next) => {
     res.setHeader('Content-Disposition', `attachment; filename="waybills_${batch.id}.zip"`);
 
     // PDF уже сжат, паковать повторно незачем - складываем без компрессии
-    const archive = new ZipArchive({ zlib: { level: 0 } });
+    const archive = archiver('zip', { zlib: { level: 0 } });
     archive.on('error', err => next(err));
     archive.pipe(res);
 
