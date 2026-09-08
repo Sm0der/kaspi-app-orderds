@@ -620,10 +620,20 @@ router.post('/assemble-batch', async (req, res, next) => {
       }
     }
 
-    // Подтянуть новые статусы/накладные из Kaspi после обработки
-    const affectedStores = [...new Set(sortedOrders.map(o => o.store_id))];
-    for (const storeId of affectedStores) {
-      syncService.syncStore(storeId).catch(err => console.error('Post-assemble sync error:', err.message));
+    // Kaspi проставляет заказу "собран" не мгновенно: сразу после успешного ASSEMBLE он
+    // ещё отдаёт assembled = false, флаг и номер накладной появляются через несколько
+    // секунд (проверено на живом заказе). Поэтому сразу тянуть синхронизацию бессмысленно -
+    // она запишет прежнее состояние. Вместо этого сами переводим заказы в "собран" и
+    // сбрасываем raw_hash, чтобы ближайшая синхронизация обязательно перечитала их из Kaspi
+    // и подставила настоящий номер накладной.
+    const assembled = results.filter(r => r.success).map(r => r.order_code);
+    if (assembled.length > 0) {
+      await db.query(
+        `UPDATE orders
+         SET stage = 'packed', raw_hash = NULL, updated_at = NOW()
+         WHERE order_code = ANY($1)`,
+        [assembled]
+      );
     }
 
     res.json({
