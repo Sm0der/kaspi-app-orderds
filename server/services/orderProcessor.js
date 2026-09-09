@@ -1,20 +1,42 @@
-// Классификация заказов по срочности в зависимости от даты доставки
-function classifyByUrgency(deliveryDate) {
-  if (!deliveryDate) return 'unknown';
+// Бизнес ведётся по времени Алматы (UTC+5, круглый год, без перевода стрелок). "Сегодня" и
+// календарный день любой даты нужно всегда считать по нему, а не по часовому поясу процесса -
+// на Vercel это UTC. new Date().setHours(0,0,0,0) и подобное считают полночь по локальному
+// поясу ПРОЦЕССА: примерно 5 часов в конце каждых суток по UTC (00:00-04:59 в Алматы) в
+// Алматы уже наступил следующий день, а для UTC-процесса - ещё вчерашний. Проверено на
+// реальных данных: заказ, оформленный в 00:00:14 5 августа по Алматы, был сохранён с
+// order_date "2026-08-04 19:00" - то есть числился ЗАДНИМ ЧИСЛОМ, за 4 августа. Из 1300+
+// заказов в такое окно попадает около 8% (109 штук) - фильтр "новые заказы: сегодня/вчера"
+// показывал их не за тот день, а срочность (просрочено/сегодня/скоро) в это же окно каждый
+// вечер съезжала на день для вообще всех заказов сразу.
+const ALMATY_OFFSET_MS = 5 * 60 * 60 * 1000;
 
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+// Календарный день (YYYY-MM-DD) в Алматы для произвольного момента - строкой, а не Date:
+// дальше эта строка либо сравнивается как строка, либо идёт в БД как есть, поэтому её
+// значение не зависит от того, как её потом будет форматировать чей-то часовой пояс.
+function almatyDateString(epochMs) {
+  const shifted = new Date(Number(epochMs) + ALMATY_OFFSET_MS);
+  const y = shifted.getUTCFullYear();
+  const m = String(shifted.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(shifted.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
 
-  const delivery = new Date(deliveryDate);
-  delivery.setHours(0, 0, 0, 0);
+// Классификация заказов по срочности в зависимости от даты доставки/передачи курьеру
+function classifyByUrgency(deadlineEpochMs) {
+  if (!deadlineEpochMs) return 'unknown';
 
-  const daysUntilDelivery = Math.floor((delivery - today) / (1000 * 60 * 60 * 24));
+  const todayStr = almatyDateString(Date.now());
+  const deadlineStr = almatyDateString(deadlineEpochMs);
 
-  if (daysUntilDelivery < 0) {
+  const daysUntilDeadline = Math.round(
+    (Date.parse(`${deadlineStr}T00:00:00Z`) - Date.parse(`${todayStr}T00:00:00Z`)) / (1000 * 60 * 60 * 24)
+  );
+
+  if (daysUntilDeadline < 0) {
     return 'overdue'; // Просрочено
-  } else if (daysUntilDelivery === 0) {
+  } else if (daysUntilDeadline === 0) {
     return 'today'; // Срочно сегодня
-  } else if (daysUntilDelivery <= 2) {
+  } else if (daysUntilDeadline <= 2) {
     return 'soon'; // Скоро (1-2 дня)
   } else {
     return 'upcoming'; // Предстоит
@@ -124,10 +146,13 @@ function transformKaspiOrder(kaspiOrder, storeId) {
     status: attributes.status, // APPROVED_BY_BANK, ACCEPTED_BY_MERCHANT, COMPLETED, CANCELLED
     state: attributes.state, // NEW, SIGN_REQUIRED, PICKUP, DELIVERY, KASPI_DELIVERY, ARCHIVE
     stage,
-    delivery_date: attributes.plannedDeliveryDate ? new Date(attributes.plannedDeliveryDate) : null,
+    // Обе даты - строкой алматинского календарного дня (см. almatyDateString выше), а не
+    // Date-объектом: Date для "timestamp without time zone" сериализуется по часовому поясу
+    // процесса и воспроизводит ту же ошибку на день, которую этот код как раз чинит.
+    delivery_date: attributes.plannedDeliveryDate ? almatyDateString(attributes.plannedDeliveryDate) : null,
     // Дата фактического создания заказа в Kaspi (когда клиент оформил) - для фильтра
     // "новые заказы за сегодня/вчера/месяц", в отличие от delivery_date (когда доставить).
-    order_date: attributes.creationDate ? new Date(attributes.creationDate) : null,
+    order_date: attributes.creationDate ? almatyDateString(attributes.creationDate) : null,
     urgency: needsMerchantAction ? classifyByUrgency(urgencyDeadline) : null,
     raw_data: kaspiOrder
   };
