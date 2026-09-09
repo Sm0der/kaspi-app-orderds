@@ -28,12 +28,23 @@ async function findImageBySku(sku) {
 
   while (attempt < MAX_RETRIES) {
     try {
-      const { data } = await client.get(SEARCH_URL, {
+      const response = await client.get(SEARCH_URL, {
         params: { text: sku, page: 0, all: false, fl: true, ui: 'd' }
       });
+      const data = response.data;
 
       const cards = data?.data?.cards || [];
       const exact = cards.find(c => String(c.configSku) === String(sku) || String(c.id) === String(sku));
+
+      // ВРЕМЕННАЯ диагностика: production (30/30 не нашлись) резко разошлась с ручной
+      // проверкой тех же артикулов (5/8 нашлись) - похоже на разницу в реакции Kaspi на
+      // адрес Vercel против обычного адреса, а не на логику сопоставления. Снять после
+      // того, как причина будет понятна по этим логам.
+      console.log(
+        `[kaspiCatalog] sku=${sku} status=${response.status} contentType=${response.headers['content-type']} ` +
+        `cards=${cards.length} exact=${!!exact} ids=[${cards.slice(0, 3).map(c => c.id).join(',')}]`
+      );
+
       if (!exact) return null;
 
       const image = exact.previewImages?.[0];
@@ -42,6 +53,13 @@ async function findImageBySku(sku) {
       attempt++;
       const status = error.response?.status;
       const retriable = !error.response || status === 429 || status >= 500;
+
+      console.log(
+        `[kaspiCatalog] sku=${sku} ОШИБКА status=${status ?? 'нет ответа'} ` +
+        `code=${error.code || '-'} message=${error.message} ` +
+        `body=${JSON.stringify(error.response?.data).slice(0, 200)}`
+      );
+
       if (!retriable || attempt >= MAX_RETRIES) {
         throw new Error(status ? `Kaspi ответил ${status}` : error.message);
       }
