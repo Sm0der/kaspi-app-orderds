@@ -454,6 +454,7 @@ export default function ShippingView({ orders, summary, loading, filters, setFil
                   <th>Город</th>
                   <th>Отгрузка</th>
                   <th>Доставка</th>
+                  <th>Фото</th>
                   <th>Товары</th>
                   <th style={{ textAlign: 'right' }}>Шт</th>
                   <th style={{ textAlign: 'right' }}>Сумма</th>
@@ -558,17 +559,17 @@ function OrderRow({ order, expanded, onToggle }) {
         <td className="num t-dim">
           {order.delivery_date ? new Date(order.delivery_date).toLocaleDateString('ru-RU') : '—'}
         </td>
+        <td>
+          {items.length > 0 && <Thumb src={items[0].imageUrl} alt={items[0].name} />}
+        </td>
         <td className="t-dim" style={{ maxWidth: 320 }}>
           {items.length === 0 ? (
             '—'
           ) : (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Thumb src={items[0].imageUrl} alt={items[0].name} size="sm" />
-              <span>
-                {items[0].name}
-                {items.length > 1 && <span className="t-faint"> +{items.length - 1}</span>}
-              </span>
-            </div>
+            <span>
+              {items[0].name}
+              {items.length > 1 && <span className="t-faint"> +{items.length - 1}</span>}
+            </span>
           )}
         </td>
         <td className="num" style={{ textAlign: 'right' }}>{totalQuantity(items)}</td>
@@ -576,7 +577,7 @@ function OrderRow({ order, expanded, onToggle }) {
       </tr>
       {expanded && items.length > 0 && (
         <tr>
-          <td colSpan={8} style={{ paddingTop: 0 }}>
+          <td colSpan={9} style={{ paddingTop: 0 }}>
             <div className="order-items">
               {items.map((item, i) => (
                 <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
