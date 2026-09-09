@@ -299,6 +299,9 @@ function OrderCard({ order, dragging, onDragStart, onDragEnd }) {
       </div>
 
       <div className="card-meta">
+        {order.customer_name && (
+          <span>{order.customer_name}{order.customer_last_name ? ` ${order.customer_last_name}.` : ''}</span>
+        )}
         {order.town && <span>{order.town}</span>}
         <span className="mono">{totalQuantity(items)} шт</span>
         <span className="mono">{formatMoney(order.total_price)}</span>

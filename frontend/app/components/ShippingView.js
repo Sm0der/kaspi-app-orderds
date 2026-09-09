@@ -580,7 +580,14 @@ function OrderRow({ order, expanded, onToggle }) {
             <div style={{ marginTop: 5, fontSize: 11.5, color: urgency.color }}>{urgency.label}</div>
           )}
         </td>
-        <td className="t-dim">{order.town || '—'}</td>
+        <td className="t-dim">
+          {order.town || '—'}
+          {order.customer_name && (
+            <div className="eyebrow" style={{ marginTop: 3, textTransform: 'none', letterSpacing: 0 }}>
+              {order.customer_name}{order.customer_last_name ? ` ${order.customer_last_name}.` : ''}
+            </div>
+          )}
+        </td>
         <td className="num" style={{ color: TONE_COLOR[ship.tone] }}>{ship.text}</td>
         <td className="num t-dim">
           {order.delivery_date ? new Date(order.delivery_date).toLocaleDateString('ru-RU') : '—'}

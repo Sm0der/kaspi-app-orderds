@@ -329,6 +329,11 @@ router.get('/summary', async (req, res, next) => {
         (o.raw_data->'attributes'->>'totalPrice')::numeric AS total_price,
         (o.raw_data->'attributes'->'kaspiDelivery'->>'courierTransmissionPlanningDate')::bigint AS shipment_plan_ms,
         (o.raw_data->'attributes'->>'assembled')::boolean AS assembled,
+        -- Kaspi отдаёт продавцу только имя и первую букву фамилии покупателя - телефон
+        -- в этом ответе всегда замаскирован (+0(000)-000-00-00), реальный видит только
+        -- курьер в своём приложении, поэтому его здесь нет и добавлять смысла нет.
+        (o.raw_data->'attributes'->'customer'->>'name') AS customer_name,
+        (o.raw_data->'attributes'->'customer'->>'lastName') AS customer_last_name,
         COALESCE(
           json_agg(
             json_build_object(
