@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api, errorText } from '../lib/api';
 import { stageOf, urgencyOf, shipmentLabel, totalQuantity, formatMoney } from '../lib/labels';
+import Thumb from './Thumb';
 
 const TONE_COLOR = {
   red: 'var(--red)',
@@ -290,8 +291,11 @@ function OrderCard({ order, dragging, onDragStart, onDragEnd }) {
       </div>
 
       <div className="card-title">
-        {items.length === 0 ? '—' : items[0].name}
-        {items.length > 1 && <span className="t-faint"> +{items.length - 1}</span>}
+        {items.length > 0 && <Thumb src={items[0].imageUrl} alt={items[0].name} size="sm" />}
+        <span className="card-title-text">
+          {items.length === 0 ? '—' : items[0].name}
+          {items.length > 1 && <span className="t-faint"> +{items.length - 1}</span>}
+        </span>
       </div>
 
       <div className="card-meta">

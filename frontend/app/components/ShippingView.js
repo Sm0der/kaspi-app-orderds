@@ -6,6 +6,7 @@ import {
   STAGES, STAGE_ORDER, stageOf, urgencyOf,
   shipmentLabel, isShippingToday, formatMoney, totalQuantity
 } from '../lib/labels';
+import Thumb from './Thumb';
 
 const TONE_COLOR = {
   red: 'var(--red)',
@@ -396,6 +397,8 @@ export default function ShippingView({ orders, summary, loading, filters, setFil
         </section>
       </div>
 
+      {isAdmin && <ProductImagesPanel />}
+
       {/* ── Сводка товаров ─────────────────────────────────────────── */}
       {(stage || urgency) && productSummary.length > 0 && (
         <section className="panel rise" style={{ marginBottom: 22 }}>
@@ -474,6 +477,78 @@ export default function ShippingView({ orders, summary, loading, filters, setFil
   );
 }
 
+// Картинки товаров Kaspi не отдаёт через API продавца (только при загрузке товара самим
+// продавцом), поэтому подтягиваем их из публичного поиска kaspi.kz по артикулу - вручную,
+// пакетами, чтобы не превращать это в фоновую нагрузку на каждой синхронизации.
+function ProductImagesPanel() {
+  const [status, setStatus] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [lastRun, setLastRun] = useState(null);
+  const [error, setError] = useState(null);
+
+  const loadStatus = async () => {
+    try {
+      const { data } = await api.get('/api/orders/products/images/status');
+      setStatus(data);
+    } catch {
+      setStatus(null);
+    }
+  };
+
+  useEffect(() => { loadStatus(); }, []);
+
+  const fetchBatch = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const { data } = await api.post('/api/orders/products/images/fetch', { limit: 30 });
+      setLastRun(data);
+      await loadStatus();
+    } catch (err) {
+      setError(errorText(err, 'Не удалось подтянуть картинки'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!status || status.total === 0) return null;
+
+  return (
+    <section className="panel rise" style={{ marginBottom: 22 }}>
+      <div className="panel-head">
+        <h2>Картинки товаров</h2>
+        <span className="eyebrow">{status.total - status.missing} из {status.total} с картинкой</span>
+      </div>
+      <div className="panel-body">
+        <p className="panel-note" style={{ marginBottom: 14 }}>
+          Kaspi не отдаёт фото через API продавца по уже существующему артикулу - подтягиваем
+          их из открытого поиска на kaspi.kz, по 30 товаров за раз, чтобы новый сотрудник
+          узнавал товар по фото, а не только по названию.
+        </p>
+
+        {error && <div className="alert alert-error">{error}</div>}
+
+        {status.missing === 0 ? (
+          <div className="alert alert-ok">Картинки подтянуты для всех товаров каталога.</div>
+        ) : (
+          <button className="btn btn-primary" onClick={fetchBatch} disabled={busy}>
+            {busy && <span className="spinner" />} Подтянуть ещё {Math.min(30, status.missing)} из {status.missing}
+          </button>
+        )}
+
+        {lastRun && (
+          <div className="panel-note" style={{ marginTop: 12 }}>
+            Обработано {lastRun.processed}, найдено {lastRun.updated}
+            {lastRun.notFound.length > 0 && (
+              <> · не нашлись: <span className="mono t-faint">{lastRun.notFound.join(', ')}</span></>
+            )}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
 function Kpi({ value, label, accent, active, onClick, hint }) {
   return (
     <button className="kpi" data-active={active} onClick={onClick} style={{ '--accent': accent }} title={hint}>
@@ -511,8 +586,17 @@ function OrderRow({ order, expanded, onToggle }) {
           {order.delivery_date ? new Date(order.delivery_date).toLocaleDateString('ru-RU') : '—'}
         </td>
         <td className="t-dim" style={{ maxWidth: 320 }}>
-          {items.length === 0 ? '—' : items[0].name}
-          {items.length > 1 && <span className="t-faint"> +{items.length - 1}</span>}
+          {items.length === 0 ? (
+            '—'
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Thumb src={items[0].imageUrl} alt={items[0].name} size="sm" />
+              <span>
+                {items[0].name}
+                {items.length > 1 && <span className="t-faint"> +{items.length - 1}</span>}
+              </span>
+            </div>
+          )}
         </td>
         <td className="num" style={{ textAlign: 'right' }}>{totalQuantity(items)}</td>
         <td className="num t-dim" style={{ textAlign: 'right' }}>{formatMoney(order.total_price)}</td>
@@ -522,10 +606,13 @@ function OrderRow({ order, expanded, onToggle }) {
           <td colSpan={8} style={{ paddingTop: 0 }}>
             <div className="order-items">
               {items.map((item, i) => (
-                <div key={i}>
-                  {item.name}
-                  {item.quantity > 1 && <strong className="num"> × {item.quantity}</strong>}
-                  {item.sku && <span className="t-faint mono"> · {item.sku}</span>}
+                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Thumb src={item.imageUrl} alt={item.name} size="sm" />
+                  <span>
+                    {item.name}
+                    {item.quantity > 1 && <strong className="num"> × {item.quantity}</strong>}
+                    {item.sku && <span className="t-faint mono"> · {item.sku}</span>}
+                  </span>
                 </div>
               ))}
             </div>
