@@ -1,0 +1,352 @@
+// Схема производства и склада.
+//
+// ВАЖНО: база здесь та же, что у дашборда заказов (проект aiatnvqgghdkzrbuqcmw).
+// Своих stores/orders/order_items тут нет и быть не должно - магазины, заказы и позиции
+// заказов ведёт синхронизация с Kaspi в приложении kaspi-app-orderds, а склад с цехом
+// просто читают их. Модели Store/Order/OrderItem/Product ниже описывают ЧУЖИЕ таблицы:
+// приложение склада из них только читает, писать в них нельзя - следующий синк перезапишет.
+//
+// Собственное состояние склада (замок сборки, сколько уже собрано) вынесено в отдельные
+// таблицы order_picking / order_item_picking ровно по этой причине.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// === ЧУЖИЕ ТАБЛИЦЫ (владелец - приложение заказов), только чтение ===
+
+model Store {
+  id       Int    @id @default(autoincrement())
+  name     String @db.VarChar(255)
+  apiToken String @map("api_token") @db.VarChar(255)
+
+  orders          Order[]
+  products        Product[]
+  productionUsers ProductionUser[]
+  itemSkus        WarehouseItemSku[]
+
+  @@map("stores")
+}
+
+model Order {
+  id           Int       @id @default(autoincrement())
+  storeId      Int       @map("store_id")
+  kaspiOrderId String    @unique @map("kaspi_order_id") @db.VarChar(100)
+  orderCode    String?   @map("order_code") @db.VarChar(50)
+  stage        String?   @db.VarChar(20)
+  shipDate     DateTime? @map("ship_date") @db.Date
+  deliveryDate DateTime? @map("delivery_date") @db.Date
+  createdAt    DateTime? @map("created_at")
+
+  store              Store               @relation(fields: [storeId], references: [id])
+  items              OrderItem[]
+  picking            OrderPicking?
+  warehouseMovements WarehouseMovement[]
+
+  @@map("orders")
+}
+
+model OrderItem {
+  id       Int    @id @default(autoincrement())
+  orderId  Int    @map("order_id")
+  sku      String @db.VarChar(100)
+  name     String @db.VarChar(255)
+  quantity Int
+
+  order   Order            @relation(fields: [orderId], references: [id])
+  picking OrderItemPicking?
+
+  @@map("order_items")
+}
+
+model Product {
+  id       Int     @id @default(autoincrement())
+  storeId  Int     @map("store_id")
+  sku      String  @db.VarChar(100)
+  name     String  @db.VarChar(255)
+  imageUrl String? @map("image_url")
+
+  store Store @relation(fields: [storeId], references: [id])
+
+  @@unique([storeId, sku])
+  @@map("products")
+}
+
+// === СОСТОЯНИЕ СБОРКИ (наше) ===
+
+enum OrderPickingStatus {
+  NEW
+  PICKING
+  BLOCKED
+  READY
+  SHIPPED
+
+  @@map("order_picking_status")
+}
+
+model OrderPicking {
+  orderId     Int                @id @map("order_id")
+  status      OrderPickingStatus @default(NEW)
+  lockedBy    String?            @map("locked_by")
+  startedAt   DateTime?          @map("started_at")
+  completedAt DateTime?          @map("completed_at")
+  updatedAt   DateTime           @default(now()) @map("updated_at")
+
+  order  Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  locker ProductionUser? @relation(fields: [lockedBy], references: [id])
+
+  @@map("order_picking")
+}
+
+model OrderItemPicking {
+  orderItemId    Int      @id @map("order_item_id")
+  quantityPicked Int      @default(0) @map("quantity_picked")
+  updatedAt      DateTime @default(now()) @map("updated_at")
+
+  orderItem OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+
+  @@map("order_item_picking")
+}
+
+// === ПРОИЗВОДСТВО И СКЛАД ===
+
+enum ProductionUserRole {
+  ADMIN
+  WORKSHOP_WORKER
+  WORKSHOP_MASTER
+  WAREHOUSE_RECEIVER
+  WAREHOUSE_SHIPPER
+  MANAGER
+
+  @@map("production_user_role")
+}
+
+enum ProductionItemStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  ON_HOLD
+
+  @@map("production_item_status")
+}
+
+enum WorkshopOperationStatus {
+  COMPLETED
+  DEFECTIVE
+  ON_HOLD
+
+  @@map("workshop_operation_status")
+}
+
+enum BarcodeStatus {
+  IN_STOCK
+  IN_ORDER
+  SHIPPED
+  DAMAGED
+
+  @@map("barcode_status")
+}
+
+enum WarehouseMovementType {
+  INBOUND
+  OUTBOUND
+
+  @@map("warehouse_movement_type")
+}
+
+// Сотрудники цеха и склада. Отдельно от app_users дашборда: рабочий у сканера входит
+// по логину и паролю, аккаунт в Supabase Auth ему не заводят.
+model ProductionUser {
+  id           String             @id @default(dbgenerated("gen_random_uuid()::text"))
+  email        String             @unique @db.VarChar(255)
+  passwordHash String             @map("password_hash")
+  fullName     String             @map("full_name") @db.VarChar(200)
+  role         ProductionUserRole
+  workshopId   String?            @map("workshop_id")
+  warehouseId  String?            @map("warehouse_id")
+  storeId      Int?               @map("store_id")
+  isActive     Boolean            @default(true) @map("is_active")
+  createdAt    DateTime           @default(now()) @map("created_at")
+  updatedAt    DateTime           @default(now()) @map("updated_at")
+
+  workshop           Workshop?           @relation(fields: [workshopId], references: [id])
+  warehouse          Warehouse?          @relation(fields: [warehouseId], references: [id])
+  store              Store?              @relation(fields: [storeId], references: [id])
+  workshopOperations WorkshopOperation[]
+  warehouseMovements WarehouseMovement[]
+  lockedOrders       OrderPicking[]
+  labelBatches       LabelBatch[]
+
+  @@index([role])
+  @@map("production_users")
+}
+
+model Workshop {
+  id            String   @id @default(dbgenerated("gen_random_uuid()::text"))
+  name          String   @db.VarChar(120)
+  orderSequence Int      @unique @map("order_sequence")
+  description   String?
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  users              ProductionUser[]
+  productionItems    ProductionItem[]
+  workshopOperations WorkshopOperation[]
+
+  @@map("workshops")
+}
+
+model Warehouse {
+  id        String   @id @default(dbgenerated("gen_random_uuid()::text"))
+  name      String   @db.VarChar(120)
+  location  String?  @db.VarChar(200)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  users              ProductionUser[]
+  warehouseItems     WarehouseItem[]
+  warehouseMovements WarehouseMovement[]
+
+  @@map("warehouses")
+}
+
+// Изделие - единица учёта производства и склада. Оно, а не артикул Kaspi: цех делает
+// «Комод Венеция» один раз, а продаваться он может под несколькими артикулами.
+model WarehouseItem {
+  id             String   @id @default(dbgenerated("gen_random_uuid()::text"))
+  code           String   @unique @db.VarChar(64)
+  name           String   @db.VarChar(255)
+  warehouseId    String?  @map("warehouse_id")
+  quantityOnHand Int      @default(0) @map("quantity_on_hand")
+  imageUrl       String?  @map("image_url")
+  /// Сколько коробок в одной штуке: на каждую печатается своя этикетка «N из M»
+  boxesPerUnit   Int      @default(1) @map("boxes_per_unit")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @default(now()) @map("updated_at")
+
+  warehouse       Warehouse?         @relation(fields: [warehouseId], references: [id])
+  skus            WarehouseItemSku[]
+  barcodes        Barcode[]
+  productionItems ProductionItem[]
+  labelBatches    LabelBatch[]
+
+  @@map("warehouse_items")
+}
+
+// Артикулы Kaspi этого изделия: один ко многим. Направление держит @@unique([storeId, sku]) -
+// у артикула ровно одно изделие, у изделия сколько угодно артикулов.
+model WarehouseItemSku {
+  id              Int      @id @default(autoincrement())
+  warehouseItemId String   @map("warehouse_item_id")
+  storeId         Int      @map("store_id")
+  sku             String   @db.VarChar(100)
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  warehouseItem WarehouseItem @relation(fields: [warehouseItemId], references: [id], onDelete: Cascade)
+  store         Store         @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@unique([storeId, sku])
+  @@index([warehouseItemId])
+  @@map("warehouse_item_skus")
+}
+
+model Barcode {
+  id              String        @id @default(dbgenerated("gen_random_uuid()::text"))
+  barcodeValue    String        @unique @map("barcode_value") @db.VarChar(120)
+  warehouseItemId String        @map("warehouse_item_id")
+  status          BarcodeStatus @default(IN_STOCK)
+  batchId         String?       @map("batch_id")
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @default(now()) @map("updated_at")
+
+  warehouseItem      WarehouseItem       @relation(fields: [warehouseItemId], references: [id], onDelete: Cascade)
+  warehouseMovements WarehouseMovement[]
+
+  @@index([warehouseItemId])
+  @@index([status])
+  @@map("barcodes")
+}
+
+model ProductionItem {
+  id                String               @id @default(dbgenerated("gen_random_uuid()::text"))
+  warehouseItemId   String?              @map("warehouse_item_id")
+  name              String               @db.VarChar(255)
+  quantity          Int
+  unit              String               @default("шт") @db.VarChar(20)
+  currentWorkshopId String               @map("current_workshop_id")
+  status            ProductionItemStatus @default(PENDING)
+  notes             String?
+  createdAt         DateTime             @default(now()) @map("created_at")
+  updatedAt         DateTime             @default(now()) @map("updated_at")
+
+  warehouseItem      WarehouseItem?      @relation(fields: [warehouseItemId], references: [id])
+  currentWorkshop    Workshop            @relation(fields: [currentWorkshopId], references: [id])
+  workshopOperations WorkshopOperation[]
+
+  @@index([currentWorkshopId])
+  @@index([status])
+  @@map("production_items")
+}
+
+model WorkshopOperation {
+  id                String                  @id @default(dbgenerated("gen_random_uuid()::text"))
+  productionItemId  String                  @map("production_item_id")
+  workshopId        String                  @map("workshop_id")
+  workerId          String                  @map("worker_id")
+  quantityCompleted Int                     @map("quantity_completed")
+  status            WorkshopOperationStatus @default(COMPLETED)
+  defectPhotoUrl    String?                 @map("defect_photo_url")
+  notes             String?
+  completedAt       DateTime?               @map("completed_at")
+  createdAt         DateTime                @default(now()) @map("created_at")
+
+  productionItem ProductionItem @relation(fields: [productionItemId], references: [id], onDelete: Cascade)
+  workshop       Workshop       @relation(fields: [workshopId], references: [id])
+  worker         ProductionUser @relation(fields: [workerId], references: [id])
+
+  @@index([productionItemId])
+  @@index([workerId])
+  @@map("workshop_operations")
+}
+
+model WarehouseMovement {
+  id          String                @id @default(dbgenerated("gen_random_uuid()::text"))
+  type        WarehouseMovementType
+  barcodeId   String                @map("barcode_id")
+  warehouseId String                @map("warehouse_id")
+  orderId     Int?                  @map("order_id")
+  staffId     String                @map("staff_id")
+  quantity    Int
+  notes       String?
+  recordedAt  DateTime              @default(now()) @map("recorded_at")
+  createdAt   DateTime              @default(now()) @map("created_at")
+
+  barcode   Barcode        @relation(fields: [barcodeId], references: [id])
+  warehouse Warehouse      @relation(fields: [warehouseId], references: [id])
+  order     Order?         @relation(fields: [orderId], references: [id])
+  staff     ProductionUser @relation(fields: [staffId], references: [id])
+
+  @@index([barcodeId])
+  @@index([orderId])
+  @@index([type])
+  @@map("warehouse_movements")
+}
+
+// Партия напечатанных этикеток - чтобы можно было перепечатать ту же пачку
+// и видеть, когда и кем эти штрихкоды были наклеены.
+model LabelBatch {
+  id              Int      @id @default(autoincrement())
+  warehouseItemId String   @map("warehouse_item_id")
+  units           Int
+  printedBy       String?  @map("printed_by")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  warehouseItem WarehouseItem   @relation(fields: [warehouseItemId], references: [id], onDelete: Cascade)
+  printer       ProductionUser? @relation(fields: [printedBy], references: [id])
+
+  @@index([warehouseItemId])
+  @@map("label_batches")
+}
