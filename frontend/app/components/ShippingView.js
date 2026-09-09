@@ -274,7 +274,7 @@ export default function ShippingView({ orders, summary, loading, filters, setFil
         </div>
 
         <div className="field">
-          <label>Доставить с</label>
+          <label title="Плановая дата передачи курьеру - как в кабинете Kaspi">Передать курьеру с</label>
           <input type="date" className="input" value={filters.dateFrom} onChange={setDate('dateFrom')} />
         </div>
         <div className="field">

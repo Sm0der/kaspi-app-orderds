@@ -235,13 +235,16 @@ router.get('/summary', async (req, res, next) => {
       params.push(storeId);
       whereClauses.push(`o.store_id = $${params.length}`);
     }
+    // Фильтр по дню отгрузки - по плановой дате передачи курьеру (ship_date), той самой,
+    // что продавец видит в кабинете Kaspi. По дате прибытия к клиенту (delivery_date)
+    // за тот же день попадает совсем другой набор заказов: она на 1-3 дня позже.
     if (dateFrom) {
       params.push(dateFrom);
-      whereClauses.push(`o.delivery_date >= $${params.length}`);
+      whereClauses.push(`o.ship_date >= $${params.length}`);
     }
     if (dateTo) {
       params.push(dateTo);
-      whereClauses.push(`o.delivery_date <= $${params.length}`);
+      whereClauses.push(`o.ship_date <= $${params.length}`);
     }
     // Фильтр по дате СОЗДАНИЯ заказа в Kaspi (order_date) - отдельно от даты доставки выше.
     // Используется для "новых заказов за сегодня/вчера/месяц".
@@ -266,7 +269,7 @@ router.get('/summary', async (req, res, next) => {
     // (город, сумма, плановая дата передачи курьеру) достаём здесь же.
     const result = await db.query(`
       SELECT o.id, o.store_id, o.kaspi_order_id, o.order_code, o.status, o.state, o.stage,
-        o.delivery_date, o.order_date, o.urgency, o.crm_status_id, o.updated_at,
+        o.delivery_date, o.ship_date, o.order_date, o.urgency, o.crm_status_id, o.updated_at,
         s.name as store_name,
         (o.raw_data->'attributes'->'deliveryAddress'->>'town') AS town,
         (o.raw_data->'attributes'->>'totalPrice')::numeric AS total_price,
@@ -298,7 +301,7 @@ router.get('/summary', async (req, res, next) => {
           WHEN 'new' THEN 0 WHEN 'accepted' THEN 1 WHEN 'packed' THEN 2
           WHEN 'shipping' THEN 3 WHEN 'completed' THEN 4 ELSE 5
         END,
-        o.urgency ASC, o.delivery_date ASC
+        o.urgency ASC, o.ship_date ASC NULLS LAST, o.delivery_date ASC
     `, params);
 
     const orders = result.rows;

@@ -137,6 +137,14 @@ WHERE units_per_space IS NOT NULL AND units_per_space > 1 AND spaces_per_unit = 
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS order_date TIMESTAMP;
 CREATE INDEX IF NOT EXISTS idx_orders_order_date ON orders(order_date);
 
+-- Миграция: плановая дата передачи курьеру (kaspiDelivery.courierTransmissionPlanningDate).
+-- Именно её продавец видит в кабинете Kaspi как «Планируемая дата передачи курьеру», и
+-- именно по ней он планирует день отгрузки. delivery_date - это другая дата, плановое
+-- прибытие к клиенту (обычно на 1-3 дня позже), поэтому фильтр по дням отгрузки на неё
+-- опираться не может: за один и тот же день числа расходятся в разы.
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS ship_date DATE;
+CREATE INDEX IF NOT EXISTS idx_orders_ship_date ON orders(ship_date);
+
 -- Миграция: хеш присланного Kaspi JSON заказа. У Kaspi нет фильтра "изменённые с ...",
 -- он всегда отдаёт все заказы за 14 дней, поэтому изменившиеся мы вычисляем сами -
 -- сравнением хеша. Без этого каждая синхронизация переписывала все ~1300 заказов,

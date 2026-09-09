@@ -150,6 +150,12 @@ function transformKaspiOrder(kaspiOrder, storeId) {
     // Date-объектом: Date для "timestamp without time zone" сериализуется по часовому поясу
     // процесса и воспроизводит ту же ошибку на день, которую этот код как раз чинит.
     delivery_date: attributes.plannedDeliveryDate ? almatyDateString(attributes.plannedDeliveryDate) : null,
+    // Плановая дата передачи курьеру - то же поле, что в кабинете Kaspi в колонке
+    // «Планируемая дата передачи курьеру». По ней склад планирует день отгрузки, поэтому
+    // фильтры и сортировка отгрузки идут по ней, а не по дате прибытия к клиенту.
+    ship_date: attributes.kaspiDelivery?.courierTransmissionPlanningDate
+      ? almatyDateString(attributes.kaspiDelivery.courierTransmissionPlanningDate)
+      : null,
     // Дата фактического создания заказа в Kaspi (когда клиент оформил) - для фильтра
     // "новые заказы за сегодня/вчера/месяц", в отличие от delivery_date (когда доставить).
     order_date: attributes.creationDate ? almatyDateString(attributes.creationDate) : null,

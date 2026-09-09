@@ -168,7 +168,7 @@ class SyncService {
       const existing = new Map();
       if (uniqueOrders.length > 0) {
         const known = await db.query(
-          `SELECT o.kaspi_order_id, o.id, o.raw_hash, o.urgency,
+          `SELECT o.kaspi_order_id, o.id, o.raw_hash, o.urgency, o.ship_date,
                   (o.order_date IS NOT NULL) AS has_order_date,
                   EXISTS (SELECT 1 FROM order_items oi WHERE oi.order_id = o.id) AS has_items
            FROM orders o
@@ -195,7 +195,10 @@ class SyncService {
         const needsWrite = !prev
           || prev.raw_hash !== rawHash
           || prev.urgency !== order.urgency
-          || !prev.has_order_date;
+          || !prev.has_order_date
+          // ship_date появилась позже остальных полей: у заказов, синхронизированных до неё,
+          // хеш совпадает и без этой проверки строка никогда бы не перезаписалась.
+          || (order.ship_date && !prev.ship_date);
         const missingItems = !prev || !prev.has_items;
 
         if (!needsWrite && !missingItems) {
@@ -211,24 +214,25 @@ class SyncService {
 
       // Пишем заказы пачками по DB_BATCH_SIZE строк за запрос
       const idByKaspiId = new Map();
-      const ORDER_COLUMNS = 11;
+      const ORDER_COLUMNS = 12;
       for (const batch of chunk(toUpsert, DB_BATCH_SIZE)) {
         const values = [];
         for (const { order, rawHash, rawJson } of batch) {
           values.push(
             order.store_id, order.kaspi_order_id, order.order_code, order.status, order.state,
-            order.stage, order.delivery_date, order.order_date, order.urgency,
+            order.stage, order.delivery_date, order.ship_date, order.order_date, order.urgency,
             rawJson, rawHash
           );
         }
 
         const upserted = await db.query(
           `INSERT INTO orders (store_id, kaspi_order_id, order_code, status, state, stage,
-                               delivery_date, order_date, urgency, raw_data, raw_hash)
+                               delivery_date, ship_date, order_date, urgency, raw_data, raw_hash)
            VALUES ${buildPlaceholders(batch.length, ORDER_COLUMNS)}
            ON CONFLICT (kaspi_order_id) DO UPDATE SET
              status = EXCLUDED.status, state = EXCLUDED.state, stage = EXCLUDED.stage,
              order_code = EXCLUDED.order_code, delivery_date = EXCLUDED.delivery_date,
+             ship_date = EXCLUDED.ship_date,
              order_date = COALESCE(orders.order_date, EXCLUDED.order_date),
              urgency = EXCLUDED.urgency, raw_data = EXCLUDED.raw_data,
              raw_hash = EXCLUDED.raw_hash, updated_at = NOW()
