@@ -307,6 +307,13 @@ a:hover { color: var(--brass-bright); }
 /* ── Фильтры ─────────────────────────────────────────────────────────────── */
 
 .filters {
+  /* position+z-index обязательны: класс .rise даёт этому блоку анимацию (opacity/transform),
+     а такая анимация сама по себе создаёт новый слой наложения - без этого z-index:30 у
+     .suggest (выпадающего списка подсказок) работал бы только ВНУТРИ .filters и не мог бы
+     перекрыть панели ниже ("Найти заказы...", "Сформировать накладные"), которые в обычном
+     потоке рисуются позже и оказывались бы поверх списка, обрезая его почти под корень. */
+  position: relative;
+  z-index: 20;
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
@@ -429,22 +436,23 @@ table.data tbody tr:last-child td { border-bottom: 0; }
 /* Миниатюра товара - чтобы новый сотрудник узнавал вещь по фото, а не только по названию */
 .thumb {
   flex: none;
-  width: 34px;
-  height: 34px;
+  width: 52px;
+  height: 52px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--line);
   background: var(--ink-900);
   object-fit: cover;
   vertical-align: middle;
 }
-.thumb-sm { width: 22px; height: 22px; border-radius: 5px; }
+.thumb-sm { width: 28px; height: 28px; border-radius: 5px; }
 .thumb-placeholder {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   color: var(--text-faint);
-  font-size: 14px;
+  font-size: 20px;
 }
+.thumb-placeholder.thumb-sm { font-size: 13px; }
 
 /* ── Канбан ──────────────────────────────────────────────────────────────── */
 
