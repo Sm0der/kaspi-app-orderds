@@ -478,38 +478,19 @@ export default function ShippingView({ orders, summary, loading, filters, setFil
 }
 
 // Картинки товаров Kaspi не отдаёт через API продавца (только при загрузке товара самим
-// продавцом), поэтому подтягиваем их из публичного поиска kaspi.kz по артикулу - вручную,
-// пакетами, чтобы не превращать это в фоновую нагрузку на каждой синхронизации.
+// продавцом) - подтягиваются из публичного поиска kaspi.kz по артикулу. Кнопки "подтянуть"
+// здесь нет намеренно: Kaspi блокирует этот поиск по IP датацентра Vercel (30 из 30
+// запросов подряд получили 429 со страницей защиты от ботов, с первой же попытки) - сама
+// кнопка была бы обречена всегда возвращать "найдено 0". Пополнение каталога делается
+// разово вручную, с обычного адреса, поэтому здесь только статус.
 function ProductImagesPanel() {
   const [status, setStatus] = useState(null);
-  const [busy, setBusy] = useState(false);
-  const [lastRun, setLastRun] = useState(null);
-  const [error, setError] = useState(null);
 
-  const loadStatus = async () => {
-    try {
-      const { data } = await api.get('/api/orders/products/images/status');
-      setStatus(data);
-    } catch {
-      setStatus(null);
-    }
-  };
-
-  useEffect(() => { loadStatus(); }, []);
-
-  const fetchBatch = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      const { data } = await api.post('/api/orders/products/images/fetch', { limit: 30 });
-      setLastRun(data);
-      await loadStatus();
-    } catch (err) {
-      setError(errorText(err, 'Не удалось подтянуть картинки'));
-    } finally {
-      setBusy(false);
-    }
-  };
+  useEffect(() => {
+    api.get('/api/orders/products/images/status')
+      .then(({ data }) => setStatus(data))
+      .catch(() => setStatus(null));
+  }, []);
 
   if (!status || status.total === 0) return null;
 
@@ -520,29 +501,14 @@ function ProductImagesPanel() {
         <span className="eyebrow">{status.total - status.missing} из {status.total} с картинкой</span>
       </div>
       <div className="panel-body">
-        <p className="panel-note" style={{ marginBottom: 14 }}>
-          Kaspi не отдаёт фото через API продавца по уже существующему артикулу - подтягиваем
-          их из открытого поиска на kaspi.kz, по 30 товаров за раз, чтобы новый сотрудник
-          узнавал товар по фото, а не только по названию.
-        </p>
-
-        {error && <div className="alert alert-error">{error}</div>}
-
         {status.missing === 0 ? (
           <div className="alert alert-ok">Картинки подтянуты для всех товаров каталога.</div>
         ) : (
-          <button className="btn btn-primary" onClick={fetchBatch} disabled={busy}>
-            {busy && <span className="spinner" />} Подтянуть ещё {Math.min(30, status.missing)} из {status.missing}
-          </button>
-        )}
-
-        {lastRun && (
-          <div className="panel-note" style={{ marginTop: 12 }}>
-            Обработано {lastRun.processed}, найдено {lastRun.updated}
-            {lastRun.notFound.length > 0 && (
-              <> · не нашлись: <span className="mono t-faint">{lastRun.notFound.join(', ')}</span></>
-            )}
-          </div>
+          <p className="panel-note">
+            У {status.missing} товаров пока нет фото — Kaspi не отдаёт их по обычному
+            запросу с сервера. Попросите обновить каталог, когда появятся новые товары
+            без картинки.
+          </p>
         )}
       </div>
     </section>

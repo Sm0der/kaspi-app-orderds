@@ -4,7 +4,6 @@ const db = require('../db/init');
 const { requireAdmin } = require('../middleware/requireAuth');
 const { getOrderStats, getTodaysOrders, getUrgentOrders } = require('../services/orderProcessor');
 const { CYRILLIC_FONT_PATH, loadOrdersWithSpaces, renderManifest } = require('../services/orderDocs');
-const { findImageBySku } = require('../services/kaspiCatalog');
 
 // GET /api/orders/products/suggest - Подсказки товаров для автодополнения поиска
 // Источник - каталог products (полный ассортимент), а не только то, что было в заказах
@@ -98,68 +97,12 @@ router.get('/products/images/status', requireAdmin, async (req, res, next) => {
   }
 });
 
-// POST /api/orders/products/images/fetch - подтянуть картинки для товаров без них.
-// Берёт их из публичного (без токена) поиска на kaspi.kz по артикулу - тот же поиск,
-// что видит покупатель на сайте. Официальный API продавца отдаёт картинку только в
-// одну сторону, при ЗАГРУЗКЕ товара, прочитать её по уже существующему SKU им нельзя.
-// Тело запроса: { storeId?: 1, limit?: 30 } - лимит небольшой: каждый запрос к Kaspi
-// занимает ~1с, а функция на Vercel ограничена по времени выполнения.
-router.post('/products/images/fetch', requireAdmin, async (req, res, next) => {
-  try {
-    const { storeId } = req.body;
-    const limit = Math.min(Number(req.body.limit) || 30, 60);
-
-    const params = [];
-    let where = 'image_url IS NULL';
-    if (storeId) {
-      params.push(storeId);
-      where += ` AND store_id = $${params.length}`;
-    }
-    params.push(limit);
-
-    const missing = await db.query(
-      `SELECT id, sku FROM products WHERE ${where} ORDER BY id LIMIT $${params.length}`,
-      params
-    );
-
-    if (missing.rows.length === 0) {
-      return res.json({ processed: 0, updated: 0, notFound: [] });
-    }
-
-    // Небольшой пул вместо всех запросов разом - вежливее к чужому публичному поиску,
-    // не пытается пройти как одна волна из полусотни запросов с одного адреса.
-    const CONCURRENCY = 3;
-    const notFound = [];
-    let updated = 0;
-    let cursor = 0;
-
-    const worker = async () => {
-      while (cursor < missing.rows.length) {
-        const product = missing.rows[cursor++];
-        try {
-          const found = await findImageBySku(product.sku);
-          if (found?.imageUrl) {
-            await db.query(
-              `UPDATE products SET image_url = $1, updated_at = NOW() WHERE id = $2`,
-              [found.imageUrl, product.id]
-            );
-            updated++;
-          } else {
-            notFound.push(product.sku);
-          }
-        } catch (error) {
-          notFound.push(product.sku);
-        }
-      }
-    };
-
-    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, missing.rows.length) }, worker));
-
-    res.json({ processed: missing.rows.length, updated, notFound });
-  } catch (error) {
-    next(error);
-  }
-});
+// Раньше здесь был POST /products/images/fetch, вызывавший findImageBySku прямо из этого
+// сервера. Убран: Kaspi блокирует свой публичный поиск по IP датацентра Vercel (проверено -
+// 30 из 30 запросов подряд получили 429 со страницей защиты от ботов, с первой же попытки,
+// то есть дело не в конкретных артикулах). Работает только с обычного адреса, поэтому
+// пополнение каталога картинками делается разово вручную, не через кнопку в интерфейсе -
+// см. services/kaspiCatalog.js.
 
 // GET /api/orders/by-sku - Найти все ещё не отправленные заказы с этим SKU,
 // отсортированные по приоритету срочности/дате доставки
