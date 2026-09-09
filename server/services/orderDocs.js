@@ -30,6 +30,7 @@ async function loadOrdersWithSpaces(orderCodes) {
             o.urgency, o.delivery_date, s.name as store_name,
             (o.raw_data->'attributes'->'deliveryAddress'->>'town') AS town,
             (o.raw_data->'attributes'->'kaspiDelivery'->>'waybillNumber') AS waybill_number,
+            (o.raw_data->'attributes'->>'assembled')::boolean AS assembled,
             COALESCE(
               json_agg(
                 json_build_object(

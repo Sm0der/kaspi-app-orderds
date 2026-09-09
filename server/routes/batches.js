@@ -28,7 +28,7 @@ router.get('/', async (req, res, next) => {
 
     const result = await db.query(
       `SELECT b.id, b.created_at, b.created_by, b.order_codes, b.succeeded, b.failed, b.spaces_total,
-              array_length(b.order_codes, 1) AS orders_count
+              b.wave_number, array_length(b.order_codes, 1) AS orders_count
        FROM assembly_batches b
        ORDER BY ${column} ${direction} NULLS LAST, b.id ${direction}
        LIMIT $1`,
@@ -84,7 +84,9 @@ router.get('/:id/manifest.pdf', async (req, res, next) => {
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="manifest_${batch.id}.pdf"`);
     renderManifest(res, orders, {
-      title: `Сводный манифест — пакет №${batch.id}`,
+      title: batch.wave_number
+        ? `Сводный манифест — вывоз №${batch.wave_number}`
+        : `Сводный манифест — пакет №${batch.id}`,
       createdAt: batch.created_at
     });
   } catch (error) {
@@ -149,7 +151,7 @@ router.get('/:id/waybills.zip', async (req, res, next) => {
 async function findBatch(id) {
   if (!/^\d+$/.test(String(id))) return null;
   const result = await db.query(
-    `SELECT id, created_at, created_by, order_codes, succeeded, failed, spaces_total, results
+    `SELECT id, created_at, created_by, order_codes, succeeded, failed, spaces_total, results, wave_number
      FROM assembly_batches WHERE id = $1`,
     [id]
   );

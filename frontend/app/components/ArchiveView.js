@@ -159,7 +159,9 @@ function BatchRow({ batch, open, detail, busyId, onToggle, onDownload }) {
           <div className="num" style={{ fontWeight: 500 }}>
             {created.toLocaleDateString('ru-RU')} <span className="t-dim">{created.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}</span>
           </div>
-          <div className="eyebrow" style={{ marginTop: 3 }}>Пакет №{batch.id}</div>
+          <div className="eyebrow" style={{ marginTop: 3 }}>
+            {batch.wave_number ? `Вывоз №${batch.wave_number} · ` : ''}пакет №{batch.id}
+          </div>
         </td>
         <td className="num" style={{ textAlign: 'right' }}>{batch.orders_count}</td>
         <td className="num" style={{ textAlign: 'right', fontWeight: 600 }}>{batch.spaces_total}</td>
@@ -203,6 +205,7 @@ function BatchRow({ batch, open, detail, busyId, onToggle, onDownload }) {
                 ) : detail.orders.map((order) => {
                   const urgency = urgencyOf(order.urgency);
                   const failed = order.outcome && !order.outcome.success;
+                  const reused = order.outcome && order.outcome.success && order.outcome.reused;
 
                   return (
                     <div key={order.order_code} style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'baseline' }}>
@@ -218,6 +221,10 @@ function BatchRow({ batch, open, detail, busyId, onToggle, onDownload }) {
                       </span>
                       {failed ? (
                         <span style={{ color: 'var(--red)' }}>{order.outcome.error}</span>
+                      ) : reused ? (
+                        <span style={{ color: 'var(--steel)' }} title="Заказ был собран в более раннем вывозе, накладная переиспользована">
+                          переиспользован
+                        </span>
                       ) : urgency ? (
                         <span style={{ color: urgency.color }}>{urgency.label}</span>
                       ) : null}

@@ -92,7 +92,8 @@ router.get('/by-sku', async (req, res, next) => {
 
     const result = await db.query(`
       SELECT DISTINCT o.order_code, o.stage, o.urgency, o.delivery_date, o.store_id, s.name as store_name,
-        oi.quantity as sku_quantity
+        oi.quantity as sku_quantity,
+        (o.stage = 'packed') AS assembled
       FROM orders o
       JOIN order_items oi ON oi.order_id = o.id
       LEFT JOIN stores s ON s.id = o.store_id
@@ -176,6 +177,9 @@ router.get('/assemble-preview', async (req, res, next) => {
         delivery_date: o.delivery_date,
         positionsCount: o.positionsCount,
         numberOfSpace: o.numberOfSpace,
+        // Заказ уже собран в одном из прошлых вывозов - при формировании его накладную
+        // просто переиспользуют, к Kaspi повторно не обращаются (см. /assemble-batch)
+        assembled: o.stage === 'packed',
         items: o.items
       })),
       notFound
@@ -465,6 +469,25 @@ router.post('/assemble-batch', async (req, res, next) => {
         continue;
       }
 
+      // Заказ уже собран в одном из прошлых вывозов сегодня (или раньше), но ещё не уехал -
+      // например, курьер не забрал его в первый рейс, и его добавили во второй список вместе
+      // с новыми заказами. Kaspi не блокирует повторный ASSEMBLE такого заказа (status у него
+      // всё ещё ACCEPTED_BY_MERCHANT), поэтому раньше повторный вызов рисковал перевыпустить
+      // накладную с новым номером - тот самый дубль, который путает при сборке. Теперь просто
+      // переиспользуем то, что Kaspi уже сформировал: заказ входит в этот вывоз (и в его ZIP),
+      // но к Kaspi за этим не обращаемся.
+      if (order.stage === 'packed') {
+        results.push({
+          order_code: order.order_code,
+          success: true,
+          reused: true,
+          urgency: order.urgency,
+          positionsCount: order.positionsCount,
+          numberOfSpace: order.numberOfSpace
+        });
+        continue;
+      }
+
       try {
         // Заказ ещё не принят продавцом - сначала принимаем, потом комплектуем
         if (order.stage === 'new') {
@@ -474,6 +497,7 @@ router.post('/assemble-batch', async (req, res, next) => {
         results.push({
           order_code: order.order_code,
           success: true,
+          reused: false,
           urgency: order.urgency,
           positionsCount: order.positionsCount,
           numberOfSpace: order.numberOfSpace
@@ -490,26 +514,51 @@ router.post('/assemble-batch', async (req, res, next) => {
     // она запишет прежнее состояние. Вместо этого сами переводим заказы в "собран" и
     // сбрасываем raw_hash, чтобы ближайшая синхронизация обязательно перечитала их из Kaspi
     // и подставила настоящий номер накладной.
-    const assembled = results.filter(r => r.success).map(r => r.order_code);
-    if (assembled.length > 0) {
+    // Переиспользованные (reused) заказы уже в stage 'packed' - трогать их не нужно,
+    // обновляем только тех, кого собрали сейчас впервые.
+    const newlyAssembled = results.filter(r => r.success && !r.reused).map(r => r.order_code);
+    if (newlyAssembled.length > 0) {
       await db.query(
         `UPDATE orders
          SET stage = 'packed', raw_hash = NULL, updated_at = NOW()
          WHERE order_code = ANY($1)`,
-        [assembled]
+        [newlyAssembled]
       );
     }
 
     // Записываем пакет в архив: по нему потом видно, когда и что формировали, и из него
     // повторно скачиваются документы (см. routes/batches.js). Заказы храним списком кодов -
     // их состав и товары всегда доступны из основной таблицы по коду.
+    // wave_number - порядковый номер вывоза за сегодня (по времени Алматы), а не абстрактный
+    // id пакета: так на складе легко различить "Вывоз №1" от "Вывоз №2" без путаницы.
     let batchId = null;
+    let waveNumber = null;
     if (results.length > 0) {
       const spacesTotal = results.reduce((sum, r) => sum + (Number(r.numberOfSpace) || 0), 0);
+      // Номер вывоза считаем и вставляем ОДНИМ запросом (CTE), а не "посчитать, потом
+      // вставить": на пуле PgBouncer в transaction-режиме два отдельных обращения могут
+      // попасть в разные соединения и не увидеть строк друг друга - проверено, оба
+      // одновременных формирования получали одинаковый номер вывоза. pg_advisory_xact_lock
+      // на ключ дня сериализует конкурентные вставки за тот же день: вторая ждёт, пока
+      // первая закоммитится, и уже тогда пересчитывает COUNT.
+      // created_at хранится как timestamp БЕЗ пояса, в UTC (как отдаёт NOW() в этой сессии) -
+      // поэтому "местная дата" считается двойной конверсией (сначала пометить как UTC,
+      // потом сдвинуть в Алматы). Один AT TIME ZONE 'Asia/Almaty' на уже-голом timestamp
+      // делает противоположное - трактует его как алматинское время и сдвигает в UTC,
+      // из-за чего дата уезжает почти на сутки (проверено: 04:10 UTC = 09:10 в Алматы,
+      // но при одинарной конверсии превращалось в предыдущий день).
       const saved = await db.query(
-        `INSERT INTO assembly_batches (created_by, order_codes, succeeded, failed, spaces_total, results)
-         VALUES ($1, $2, $3, $4, $5, $6)
-         RETURNING id`,
+        `WITH day_lock AS (
+           SELECT pg_advisory_xact_lock(hashtext('assembly_wave_' || to_char(NOW() AT TIME ZONE 'Asia/Almaty', 'YYYY-MM-DD')))
+         ),
+         next_wave AS (
+           SELECT COUNT(*) + 1 AS n FROM assembly_batches, day_lock
+           WHERE (created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Almaty')::date
+               = (NOW() AT TIME ZONE 'Asia/Almaty')::date
+         )
+         INSERT INTO assembly_batches (created_by, order_codes, succeeded, failed, spaces_total, results, wave_number)
+         SELECT $1, $2, $3, $4, $5, $6, next_wave.n FROM next_wave
+         RETURNING id, wave_number`,
         [
           req.user?.email || null,
           results.map(r => r.order_code),
@@ -520,10 +569,12 @@ router.post('/assemble-batch', async (req, res, next) => {
         ]
       );
       batchId = saved.rows[0].id;
+      waveNumber = saved.rows[0].wave_number;
     }
 
     res.json({
       batchId,
+      waveNumber,
       total: orderCodes.length,
       succeeded: results.filter(r => r.success).length,
       failed: results.filter(r => !r.success).length,

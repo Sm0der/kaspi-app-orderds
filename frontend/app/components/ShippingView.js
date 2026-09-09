@@ -91,7 +91,8 @@ export default function ShippingView({ orders, summary, loading, filters, setFil
         params: { sku: value, storeId: storeId || undefined }
       });
       const codes = data.orders.map((o) => o.order_code);
-      setSkuFound({ sku: value, count: codes.length });
+      const alreadyAssembled = data.orders.filter((o) => o.assembled).length;
+      setSkuFound({ sku: value, count: codes.length, alreadyAssembled });
 
       if (codes.length === 0) {
         setError(`Неотправленных заказов с артикулом «${value}» не найдено`);
@@ -353,6 +354,10 @@ export default function ShippingView({ orders, summary, loading, filters, setFil
             {skuFound && skuFound.count > 0 && (
               <div className="alert alert-ok" style={{ margin: '16px 0 0' }}>
                 Найдено {skuFound.count} заказ(ов) с артикулом «{skuFound.sku}» — номера подставлены.
+                {skuFound.alreadyAssembled > 0 && (
+                  <> Из них {skuFound.alreadyAssembled} уже собраны в прошлом вывозе и ждут отправки —
+                  повторно к Kaspi обращаться не будем, просто переиспользуем накладную.</>
+                )}
               </div>
             )}
           </div>
@@ -532,10 +537,18 @@ function OrderRow({ order, expanded, onToggle }) {
 }
 
 function AssemblePreview({ preview }) {
+  const reusedCount = preview.orders.filter((o) => o.assembled).length;
+
   return (
     <div style={{ marginTop: 18 }}>
       {preview.notFound.length > 0 && (
         <div className="alert alert-error">Не найдены в базе: {preview.notFound.join(', ')}</div>
+      )}
+      {reusedCount > 0 && (
+        <div className="alert alert-ok">
+          {reusedCount} заказ(ов) уже собраны раньше — их накладные просто переиспользуются,
+          Kaspi для них повторно не дёргаем.
+        </div>
       )}
       <div className="table-wrap">
         <table className="data">
@@ -553,7 +566,18 @@ function AssemblePreview({ preview }) {
               const urgency = urgencyOf(order.urgency);
               return (
                 <tr key={order.order_code}>
-                  <td className="order-code">{order.order_code}</td>
+                  <td className="order-code">
+                    {order.order_code}
+                    {order.assembled && (
+                      <span
+                        className="badge"
+                        style={{ marginLeft: 8, background: 'var(--ink-700)', borderColor: 'var(--steel)', color: 'var(--steel)' }}
+                        title="Уже собран в прошлом вывозе - накладная будет переиспользована"
+                      >
+                        уже собран
+                      </span>
+                    )}
+                  </td>
                   <td style={{ color: urgency?.color }}>{urgency?.label || '—'}</td>
                   <td className="num" style={{ textAlign: 'right' }}>{order.positionsCount}</td>
                   <td className="num" style={{ textAlign: 'right', fontWeight: 600 }}>{order.numberOfSpace}</td>
@@ -594,10 +618,15 @@ function AssembleResults({ results }) {
     }
   };
 
+  const reusedCount = results.results.filter((r) => r.success && r.reused).length;
+
   return (
     <div style={{ marginTop: 18 }}>
       <div className={results.failed ? 'alert alert-error' : 'alert alert-ok'}>
-        Готово: {results.succeeded} успешно, {results.failed} с ошибкой — из {results.total}
+        {results.waveNumber ? <>Вывоз №{results.waveNumber} готов: </> : 'Готово: '}
+        {results.succeeded} успешно
+        {reusedCount > 0 && <> (из них {reusedCount} переиспользовано)</>}
+        , {results.failed} с ошибкой — из {results.total}
       </div>
 
       {ok.length > 0 && (
@@ -620,9 +649,13 @@ function AssembleResults({ results }) {
 
       <div style={{ display: 'grid', gap: 5, fontSize: 12.5 }}>
         {results.results.map((row, i) => (
-          <div key={i} style={{ color: row.success ? 'var(--sage)' : 'var(--red)' }}>
+          <div key={i} style={{ color: row.success ? (row.reused ? 'var(--steel)' : 'var(--sage)') : 'var(--red)' }}>
             <span className="mono">{row.order_code}</span>
-            {row.success ? ` — ${row.numberOfSpace} мест` : ` — ${row.error}`}
+            {row.success
+              ? row.reused
+                ? ` — уже был собран, накладная переиспользована (${row.numberOfSpace} мест)`
+                : ` — собран сейчас, ${row.numberOfSpace} мест`
+              : ` — ${row.error}`}
           </div>
         ))}
       </div>
