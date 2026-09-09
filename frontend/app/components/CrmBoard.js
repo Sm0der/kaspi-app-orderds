@@ -270,7 +270,7 @@ export default function CrmBoard({ orders, loading, onOrdersChange, isAdmin }) {
 function OrderCard({ order, dragging, onDragStart, onDragEnd }) {
   const stage = stageOf(order.stage);
   const urgency = urgencyOf(order.urgency);
-  const ship = shipmentLabel(order.shipment_plan_ms);
+  const ship = shipmentLabel(order.shipment_plan_ms, order.shipment_fact_ms);
   const items = order.items || [];
 
   return (

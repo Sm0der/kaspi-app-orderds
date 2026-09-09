@@ -29,9 +29,17 @@ export function urgencyOf(urgency) {
 
 const DAY = 24 * 60 * 60 * 1000;
 
+const shortDate = (ms) => new Date(Number(ms)).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
+
 // Дата передачи курьеру приходит из Kaspi в миллисекундах. Именно она решает, можно ли
 // сегодня формировать накладную, поэтому показываем её человеческим языком.
-export function shipmentLabel(ms) {
+//
+// factMs - момент, когда курьер заказ уже забрал. Пока его нет, плановая дата это срок
+// продавца и просрочить его можно. После передачи срок закрыт: у любого отгруженного
+// заказа плановая дата естественным образом в прошлом, и без этой проверки весь раздел
+// «В пути» краснел словом «просрочена», хотя в кабинете Kaspi претензий нет и быть не может.
+export function shipmentLabel(ms, factMs) {
+  if (factMs) return { text: `${shortDate(factMs)} · передан`, tone: 'faint' };
   if (!ms) return { text: '—', tone: 'faint' };
 
   const date = new Date(Number(ms));
@@ -41,7 +49,7 @@ export function shipmentLabel(ms) {
   day.setHours(0, 0, 0, 0);
 
   const diff = Math.round((day - today) / DAY);
-  const short = date.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
+  const short = shortDate(ms);
 
   if (diff < 0) return { text: `${short} · просрочена`, tone: 'red' };
   if (diff === 0) return { text: `${short} · сегодня`, tone: 'amber' };

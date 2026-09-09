@@ -274,6 +274,9 @@ router.get('/summary', async (req, res, next) => {
         (o.raw_data->'attributes'->'deliveryAddress'->>'town') AS town,
         (o.raw_data->'attributes'->>'totalPrice')::numeric AS total_price,
         (o.raw_data->'attributes'->'kaspiDelivery'->>'courierTransmissionPlanningDate')::bigint AS shipment_plan_ms,
+        -- Момент, когда курьер реально забрал заказ. Пока он пуст, плановая дата - это срок
+        -- продавца; как только заполнен, обязанность выполнена и «просрочки» быть не может.
+        (o.raw_data->'attributes'->'kaspiDelivery'->>'courierTransmissionDate')::bigint AS shipment_fact_ms,
         (o.raw_data->'attributes'->>'assembled')::boolean AS assembled,
         -- Kaspi отдаёт продавцу только имя и первую букву фамилии покупателя - телефон
         -- в этом ответе всегда замаскирован (+0(000)-000-00-00), реальный видит только

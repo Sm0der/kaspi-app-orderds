@@ -527,7 +527,7 @@ function Kpi({ value, label, accent, active, onClick, hint }) {
 function OrderRow({ order, expanded, onToggle }) {
   const stage = stageOf(order.stage);
   const urgency = urgencyOf(order.urgency);
-  const ship = shipmentLabel(order.shipment_plan_ms);
+  const ship = shipmentLabel(order.shipment_plan_ms, order.shipment_fact_ms);
   const items = order.items || [];
 
   return (
