@@ -6,6 +6,7 @@ const orderRoutes = require('./routes/orders');
 const crmRoutes = require('./routes/crm');
 const userRoutes = require('./routes/users');
 const batchRoutes = require('./routes/batches');
+const runRoutes = require('./routes/runs');
 const pushRoutes = require('./routes/push');
 const requireAuth = require('./middleware/requireAuth');
 const { initDB, query } = require('./db/init');
@@ -86,6 +87,9 @@ app.use('/api/orders', requireAuth, orderRoutes);
 app.use('/api/crm', requireAuth, crmRoutes);
 app.use('/api/users', requireAuth, userRoutes);
 app.use('/api/batches', requireAuth, batchRoutes);
+// Вывозы, восстановленные по времени формирования накладных - работают и тогда,
+// когда накладные печатают в кабинете Kaspi, а не через наш сервис
+app.use('/api/runs', requireAuth, runRoutes);
 app.use('/api/push', pushRoutes);
 
 // GET /api/stores - Список магазинов для переключателя

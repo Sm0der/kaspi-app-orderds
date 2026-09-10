@@ -611,6 +611,8 @@ table.data tbody tr:last-child td { border-bottom: 0; }
   border: 1px solid;
 }
 .alert-error { background: var(--alert-error-bg); border-color: var(--alert-error-line); color: var(--alert-error-text); }
+/* Нейтральное уведомление: не ошибка и не успех, а «обратите внимание» */
+.alert-note { background: var(--brass-wash); border-color: var(--brass-line); color: var(--text); }
 .alert-ok { background: var(--alert-ok-bg); border-color: var(--alert-ok-line); color: var(--alert-ok-text); }
 
 .spinner {

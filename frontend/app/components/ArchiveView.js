@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, downloadFile, errorText } from '../lib/api';
 import { urgencyOf, totalQuantity } from '../lib/labels';
+import RunsPanel from './RunsPanel';
 
 // Архив сформированных пакетов накладных: когда собирали, что вошло и повторное
 // скачивание документов. Сортировку считает сервер - список может быть длинным,
@@ -95,6 +96,10 @@ export default function ArchiveView() {
       </div>
 
       {error && <div className="alert alert-error">{error}</div>}
+
+      {/* Вывозы идут первыми: их видно всегда, а пакеты ниже появляются только у тех
+          накладных, что формировали через сервис */}
+      <RunsPanel />
 
       <section className="panel rise">
         {loading ? (
