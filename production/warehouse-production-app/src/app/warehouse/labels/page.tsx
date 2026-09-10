@@ -91,13 +91,13 @@ export default function LabelsPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-100">
-      <nav className="bg-white shadow-sm no-print">
+    <div className="min-h-screen">
+      <nav className="sticky top-0 z-40 border-b border-line bg-[var(--topbar-bg)] backdrop-blur-md no-print">
         <div className="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
-          <h1 className="text-2xl font-bold text-gray-900">Этикетки на коробки</h1>
+          <h1 className="text-2xl font-bold text-ink">Этикетки на коробки</h1>
           <button
             onClick={() => router.push('/dashboard')}
-            className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700"
+            className="px-4 py-2 rounded border border-line text-muted transition-colors hover:bg-raised hover:text-ink"
           >
             Назад
           </button>
@@ -106,17 +106,17 @@ export default function LabelsPage() {
 
       <main className="max-w-7xl mx-auto px-4 py-8 no-print">
         {error && (
-          <div className="mb-4 p-4 bg-red-100 border border-red-400 text-red-700 rounded">{error}</div>
+          <div className="mb-4 p-4 bg-danger/10 border border-danger text-danger rounded">{error}</div>
         )}
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          <div className="bg-white rounded-lg shadow-md p-6">
+          <div className="bg-surface rounded-lg shadow-card p-6">
             <h2 className="text-xl font-bold mb-4">1. Выберите изделие</h2>
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Имя, артикул или название с Kaspi"
-              className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg mb-4 focus:outline-none focus:border-blue-500"
+              className="w-full px-4 py-3 border-2 border-line rounded-lg mb-4 focus:outline-none focus:border-brass"
             />
             <div className="space-y-2 max-h-96 overflow-y-auto">
               {found.map((item) => (
@@ -124,18 +124,18 @@ export default function LabelsPage() {
                   key={item.id}
                   onClick={() => setSelected(item)}
                   className={`w-full text-left p-3 rounded border-2 transition flex gap-3 items-center ${
-                    selected?.id === item.id ? 'border-green-500 bg-green-50' : 'border-gray-200 hover:border-blue-500'
+                    selected?.id === item.id ? 'border-ok bg-ok/10' : 'border-line hover:border-brass'
                   }`}
                 >
                   {item.imageUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={item.imageUrl} alt="" className="w-12 h-12 object-cover rounded" />
                   ) : (
-                    <span className="w-12 h-12 grid place-items-center bg-gray-100 rounded text-xl">📦</span>
+                    <span className="w-12 h-12 grid place-items-center bg-canvas rounded text-xl">📦</span>
                   )}
                   <span className="min-w-0">
                     <span className="block font-semibold text-sm truncate">{item.name}</span>
-                    <span className="block text-xs text-gray-500 font-mono">
+                    <span className="block text-xs text-faint font-mono">
                       {item.code}
                       {item.aliases.length > 1 && ` · ${item.aliases.length} назв. на Kaspi`}
                       {item.boxesPerUnit > 1 && ` · ${item.boxesPerUnit} места`}
@@ -143,18 +143,18 @@ export default function LabelsPage() {
                   </span>
                 </button>
               ))}
-              {found.length === 0 && <p className="text-gray-500 text-sm">Ничего не найдено</p>}
+              {found.length === 0 && <p className="text-faint text-sm">Ничего не найдено</p>}
             </div>
           </div>
 
-          <div className="bg-white rounded-lg shadow-md p-6">
+          <div className="bg-surface rounded-lg shadow-card p-6">
             <h2 className="text-xl font-bold mb-4">2. Сколько штук</h2>
             {!selected ? (
-              <p className="text-gray-500">Сначала выберите изделие слева.</p>
+              <p className="text-faint">Сначала выберите изделие слева.</p>
             ) : (
               <>
                 <p className="font-semibold mb-1">{selected.name}</p>
-                <p className="text-sm text-gray-600 mb-4">
+                <p className="text-sm text-muted mb-4">
                   На Kaspi: {selected.aliases.map((a) => `${a.sku} (${a.storeName})`).join(', ') || '—'}
                 </p>
 
@@ -164,9 +164,9 @@ export default function LabelsPage() {
                   max={200}
                   value={units}
                   onChange={(e) => setUnits(Math.max(1, Math.min(200, Number(e.target.value) || 1)))}
-                  className="w-32 px-4 py-3 border-2 border-gray-300 rounded-lg mb-2"
+                  className="w-32 px-4 py-3 border-2 border-line rounded-lg mb-2"
                 />
-                <p className="text-sm text-gray-600 mb-4">
+                <p className="text-sm text-muted mb-4">
                   {selected.boxesPerUnit > 1
                     ? `Будет ${units * selected.boxesPerUnit} этикеток: ${selected.boxesPerUnit} коробки на штуку`
                     : `Будет ${units} этикеток`}
@@ -175,11 +175,11 @@ export default function LabelsPage() {
                 <button
                   onClick={generate}
                   disabled={loading}
-                  className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg disabled:opacity-50"
+                  className="w-full bg-brass hover:bg-brass-bright text-on-brass font-bold py-3 rounded-lg disabled:opacity-50"
                 >
                   {loading ? 'Создаём...' : 'Создать штрихкоды'}
                 </button>
-                <p className="text-xs text-gray-500 mt-2">
+                <p className="text-xs text-faint mt-2">
                   Штрихкоды сразу становятся остатком на складе — печатайте столько, сколько коробок реально готово.
                 </p>
               </>
@@ -192,7 +192,7 @@ export default function LabelsPage() {
                 </p>
                 <button
                   onClick={() => window.print()}
-                  className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-lg"
+                  className="w-full bg-ok text-canvas transition-opacity hover:opacity-90 font-bold py-3 rounded-lg"
                 >
                   Печать
                 </button>
@@ -219,8 +219,12 @@ export default function LabelsPage() {
             size: 75mm 120mm;
             margin: 0;
           }
+          /* Этикетка печатается чёрным по белому в любой теме: у термопринтера нет
+             ни цвета, ни серого, а фоновый градиент и сетка страницы к бумаге
+             отношения не имеют. Сама этикетка ниже тоже задана в #000/#fff. */
           body {
-            background: #fff;
+            background: #fff none;
+            color: #000;
           }
         }
       `}</style>

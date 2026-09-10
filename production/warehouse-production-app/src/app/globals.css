@@ -1,28 +1,143 @@
 @import "tailwindcss";
 
+/* ============================================================================
+   Склад и производство — тот же язык, что у заказов: тёплый графит и латунь в
+   тёмной теме, тёплая бумага и та же латунь в светлой.
+
+   Токены ниже - точная копия набора из frontend/app/globals.css. Приложения
+   разные (Next 14 без TypeScript и Next 16 с Tailwind), деплои разные, общего
+   пакета у них нет - но для человека это один сайт, и цвета обязаны совпадать
+   до значения. Меняете здесь - меняйте и там.
+
+   Тему выбирает человек: атрибут data-theme на <html> переключает color-scheme,
+   а light-dark() пересчитывает все цвета. Ключ хранения общий с заказами,
+   домен общий - выбранная тема переезжает из одного раздела в другой.
+   ========================================================================= */
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  color-scheme: light dark;
+
+  /* Слои поверхностей: 900 - фон страницы, 600 - самый близкий к глазу */
+  --ink-900: light-dark(#F2EDE3, #0B0A08);
+  --ink-850: light-dark(#EDE7DB, #100E0C);
+  --ink-800: light-dark(#FBF8F2, #15120F);
+  --ink-700: light-dark(#E9E2D4, #1C1815);
+  --ink-600: light-dark(#DFD6C4, #241F1A);
+
+  --line: light-dark(#D9CFBB, #2A241E);
+  --line-soft: light-dark(#E7E0D1, #201B17);
+  --line-strong: light-dark(#C2B49A, #3B332B);
+
+  --text: light-dark(#241E16, #F1EBE1);
+  --text-dim: light-dark(#6B6153, #A79C8D);
+  --text-faint: light-dark(#948A79, #6E655A);
+
+  --brass: light-dark(#B98B36, #D6A756);
+  --brass-bright: light-dark(#D6A756, #EFC57E);
+  --brass-deep: light-dark(#8E6A24, #A87F38);
+  --brass-wash: light-dark(rgba(185, 139, 54, 0.14), rgba(214, 167, 86, 0.12));
+  --brass-line: light-dark(rgba(185, 139, 54, 0.38), rgba(214, 167, 86, 0.32));
+  --on-brass: #17120A;
+  /* Латунь как текст поверх бледной подложки: на бумаге усиление идёт в глубину,
+     а не в яркость - иначе подсвеченный элемент выглядит бледнее обычного */
+  --brass-strong: light-dark(#7C5C1E, #EFC57E);
+
+  --red: light-dark(#B23A2E, #E0574C);
+  --amber: light-dark(#9C6A12, #E39A3B);
+  --steel: light-dark(#3E6A96, #7196BC);
+  --sage: light-dark(#4F7A4F, #7FA07F);
+
+  --alert-error-bg: light-dark(rgba(178, 58, 46, 0.08), rgba(224, 87, 76, 0.09));
+  --alert-error-line: light-dark(rgba(178, 58, 46, 0.28), rgba(224, 87, 76, 0.3));
+  --alert-error-text: light-dark(#8E2A20, #F0A49D);
+  --alert-ok-bg: light-dark(rgba(79, 122, 79, 0.09), rgba(127, 160, 127, 0.09));
+  --alert-ok-line: light-dark(rgba(79, 122, 79, 0.28), rgba(127, 160, 127, 0.3));
+  --alert-ok-text: light-dark(#37592F, #A9C6A9);
+  --warn-bg: light-dark(rgba(156, 106, 18, 0.10), rgba(227, 154, 59, 0.10));
+  --warn-text: light-dark(#7A5310, #E3B173);
+
+  --topbar-bg: light-dark(rgba(250, 247, 240, 0.86), rgba(11, 10, 8, 0.82));
+  --glow-warm: light-dark(rgba(185, 139, 54, 0.13), rgba(214, 167, 86, 0.10));
+  --glow-cool: light-dark(rgba(62, 106, 150, 0.06), rgba(113, 150, 188, 0.06));
+
+  --shadow-tint-1: light-dark(rgba(72, 56, 28, 0.10), rgba(0, 0, 0, 0.4));
+  --shadow-tint-2: light-dark(rgba(72, 56, 28, 0.24), rgba(0, 0, 0, 0.7));
 }
 
+:root[data-theme='light'] { color-scheme: light; }
+:root[data-theme='dark'] { color-scheme: dark; }
+
+/* Токены в утилиты Tailwind. Именно inline: значение остаётся ссылкой на var(),
+   поэтому переключение темы пересчитывает уже отрисованную страницу, а не требует
+   пересборки классов. Названия смысловые (bg-surface, text-muted), а не цветовые:
+   «bg-white», означающий графит в тёмной теме, - ложь в разметке. */
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
+  --color-canvas: var(--ink-900);
+  --color-sunken: var(--ink-850);
+  --color-surface: var(--ink-800);
+  --color-raised: var(--ink-700);
+  --color-lifted: var(--ink-600);
 
-/* Тёмной темы здесь нет намеренно, хотя заготовка из create-next-app её включала.
-   Интерфейс склада целиком набран светлыми классами (bg-white, text-gray-900), и на
-   планшете с тёмной системной темой всё, у чего цвет текста не задан явно - кнопки
-   «Сбросить пароль», «Отключить», подписи - становилось почти белым на белой карточке.
-   color-scheme фиксирует заодно и системные элементы: выпадающие списки, поля ввода. */
-:root {
-  color-scheme: light;
+  --color-line: var(--line);
+  --color-line-soft: var(--line-soft);
+  --color-line-strong: var(--line-strong);
+
+  --color-ink: var(--text);
+  --color-muted: var(--text-dim);
+  --color-faint: var(--text-faint);
+
+  --color-brass: var(--brass);
+  --color-brass-bright: var(--brass-bright);
+  --color-brass-deep: var(--brass-deep);
+  --color-brass-strong: var(--brass-strong);
+  --color-on-brass: var(--on-brass);
+  --color-brass-wash: var(--brass-wash);
+
+  --color-danger: var(--red);
+  --color-warn: var(--amber);
+  --color-ok: var(--sage);
+
+  --font-sans: var(--font-golos), system-ui, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, monospace;
+  --font-display: var(--font-unbounded), sans-serif;
+
+  --radius-card: 14px;
+
+  --shadow-card: 0 8px 24px -12px var(--shadow-tint-2);
+  --shadow-flat: 0 1px 2px var(--shadow-tint-1);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  min-height: 100dvh;
+  background-color: var(--ink-900);
+  /* Тот же тёплый свет сверху и та же сетка 72px, что у заказов: переходя по ссылке
+     «Склад», человек не должен чувствовать, что попал в другую систему */
+  background-image:
+    radial-gradient(900px 500px at 12% -8%, var(--glow-warm), transparent 70%),
+    radial-gradient(700px 400px at 92% 0%, var(--glow-cool), transparent 70%),
+    linear-gradient(var(--line-soft) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-soft) 1px, transparent 1px);
+  background-size: auto, auto, 72px 72px, 72px 72px;
+  background-attachment: fixed;
+  color: var(--text);
+  font-family: var(--font-golos), system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Цифры, которые читают как данные - количества, артикулы, остатки - не должны
+   плясать при обновлении */
+.num { font-family: var(--font-plex-mono), ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+
+.brand-mark {
+  font-family: var(--font-unbounded), sans-serif;
+  letter-spacing: -0.01em;
+}
+
+::selection { background: var(--brass); color: var(--on-brass); }
+
+/* Фокус виден всегда: у сканера и планшета на складе клавиатурная навигация -
+   не редкость, а обычный способ работы */
+:focus-visible {
+  outline: 2px solid var(--brass);
+  outline-offset: 2px;
 }

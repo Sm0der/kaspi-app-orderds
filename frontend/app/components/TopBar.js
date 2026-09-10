@@ -1,5 +1,7 @@
 'use client';
 
+import ThemePicker from './ThemePicker';
+
 export default function TopBar({
   mode,
   onModeChange,
@@ -66,6 +68,8 @@ export default function TopBar({
           {lastSyncAt.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
         </span>
       )}
+
+      <ThemePicker />
 
       {/* Склад - соседнее приложение в разделе /sklad того же домена. Обычная ссылка,
           а не переключатель режима: это другой деплой, но для человека тот же сайт,

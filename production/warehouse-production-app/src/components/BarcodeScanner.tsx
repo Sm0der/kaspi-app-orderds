@@ -92,9 +92,10 @@ export default function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps)
   }, []);
 
   return (
-    <div className="rounded-lg border-2 border-blue-300 bg-black p-2">
+    // Чёрный фон под видео - в обеих темах: это окно камеры, а не поверхность интерфейса
+    <div className="rounded-lg border-2 border-line-strong bg-black p-2">
       {error ? (
-        <div className="p-4 text-center text-red-300 text-sm">{error}</div>
+        <div className="p-4 text-center text-danger text-sm">{error}</div>
       ) : (
         <div className="relative">
           <video
@@ -104,13 +105,13 @@ export default function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps)
             className="w-full rounded max-h-80 object-cover"
           />
           {!ready && (
-            <div className="absolute inset-0 flex items-center justify-center text-white text-sm">
+            <div className="absolute inset-0 flex items-center justify-center text-on-brass text-sm">
               Запуск камеры...
             </div>
           )}
           {ready && (
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-              <div className="w-2/3 h-1/3 border-2 border-green-400 rounded-lg" />
+              <div className="w-2/3 h-1/3 border-2 border-ok rounded-lg" />
             </div>
           )}
         </div>
@@ -118,7 +119,7 @@ export default function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps)
       <button
         type="button"
         onClick={onClose}
-        className="mt-2 w-full bg-gray-700 hover:bg-gray-600 text-white font-medium py-2 rounded-lg"
+        className="mt-2 w-full rounded-lg border border-line py-2 font-medium text-muted transition-colors hover:bg-raised hover:text-ink"
       >
         Закрыть камеру
       </button>

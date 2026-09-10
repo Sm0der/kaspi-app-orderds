@@ -52,17 +52,17 @@ export default function ChangePasswordPage() {
   const forced = user?.mustChangePassword;
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-100 px-4">
-      <div className="w-full max-w-md rounded-lg bg-white p-8 shadow-md">
-        <h1 className="mb-2 text-2xl font-bold text-gray-900">Смена пароля</h1>
-        <p className="mb-6 text-sm text-gray-600">
+    <div className="flex min-h-screen items-center justify-center bg-canvas px-4">
+      <div className="w-full max-w-md rounded-lg bg-surface p-8 shadow-card">
+        <h1 className="mb-2 text-2xl font-bold text-ink">Смена пароля</h1>
+        <p className="mb-6 text-sm text-muted">
           {forced
             ? 'Этот пароль вам выдал администратор, значит его знаете не только вы. Придумайте свой — дальше система пустит уже с ним.'
             : 'Придумайте новый пароль. Прежний перестанет действовать сразу.'}
         </p>
 
         {error && (
-          <div className="mb-4 rounded border border-red-400 bg-red-100 p-3 text-sm text-red-700">{error}</div>
+          <div className="mb-4 rounded border border-danger bg-danger/10 p-3 text-sm text-danger">{error}</div>
         )}
 
         <form onSubmit={submit} className="space-y-4">
@@ -73,7 +73,7 @@ export default function ChangePasswordPage() {
           <button
             type="submit"
             disabled={busy}
-            className="w-full rounded-lg bg-blue-600 py-2 font-bold text-white transition hover:bg-blue-700 disabled:opacity-50"
+            className="w-full rounded-lg bg-brass py-2 font-bold text-on-brass transition hover:bg-brass-bright disabled:opacity-50"
           >
             {busy ? 'Сохраняем…' : 'Сменить пароль'}
           </button>
@@ -98,16 +98,16 @@ function Field({
 }) {
   return (
     <div>
-      <label className="block text-sm font-medium text-gray-700">{label}</label>
+      <label className="block text-sm font-medium text-muted">{label}</label>
       <input
         type="password"
         value={value}
         onChange={(e) => onChange(e.target.value)}
         autoComplete={autoComplete}
         required
-        className="mt-1 w-full rounded-lg border border-gray-300 px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+        className="mt-1 w-full rounded-lg border border-line px-4 py-2 focus:ring-2 focus:ring-brass focus:outline-none"
       />
-      {hint && <p className="mt-1 text-xs text-gray-500">{hint}</p>}
+      {hint && <p className="mt-1 text-xs text-faint">{hint}</p>}
     </div>
   );
 }

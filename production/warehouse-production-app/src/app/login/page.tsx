@@ -44,19 +44,19 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-100">
-      <div className="bg-white p-8 rounded-lg shadow-md w-full max-w-md">
+    <div className="min-h-screen flex items-center justify-center bg-canvas">
+      <div className="bg-surface p-8 rounded-lg shadow-card w-full max-w-md">
         <h1 className="text-2xl font-bold mb-6 text-center">Учёт производства и склада</h1>
 
         {error && (
-          <div className="mb-4 p-4 bg-red-100 border border-red-400 text-red-700 rounded">
+          <div className="mb-4 p-4 bg-danger/10 border border-danger text-danger rounded">
             {error}
           </div>
         )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label htmlFor="email" className="block text-sm font-medium text-gray-700">
+            <label htmlFor="email" className="block text-sm font-medium text-muted">
               Email
             </label>
             <input
@@ -64,7 +64,7 @@ export default function LoginPage() {
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="mt-1 w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="mt-1 w-full px-4 py-2 border border-line rounded-lg focus:outline-none focus:ring-2 focus:ring-brass"
               placeholder="почта, которую выдал администратор"
               disabled={loading}
               required
@@ -72,7 +72,7 @@ export default function LoginPage() {
           </div>
 
           <div>
-            <label htmlFor="password" className="block text-sm font-medium text-gray-700">
+            <label htmlFor="password" className="block text-sm font-medium text-muted">
               Пароль
             </label>
             <input
@@ -80,7 +80,7 @@ export default function LoginPage() {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="mt-1 w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="mt-1 w-full px-4 py-2 border border-line rounded-lg focus:outline-none focus:ring-2 focus:ring-brass"
               placeholder="••••••••"
               disabled={loading}
               required
@@ -90,7 +90,7 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full bg-brass hover:bg-brass-bright text-on-brass font-bold py-2 px-4 rounded-lg transition duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {loading ? 'Вход...' : 'Войти'}
           </button>
@@ -98,7 +98,7 @@ export default function LoginPage() {
 
         {/* Логины со страницы входа убраны намеренно: список рабочих учёток на публичной
             странице - половина работы взломщика. Их выдаёт администратор. */}
-        <p className="mt-6 text-center text-sm text-gray-500">
+        <p className="mt-6 text-center text-sm text-faint">
           Логин и пароль выдаёт администратор
         </p>
       </div>

@@ -42,17 +42,17 @@ export default function Protected({
   }, [area, router]);
 
   if (state === 'loading') {
-    return <div className="flex min-h-screen items-center justify-center text-gray-500">Загрузка…</div>;
+    return <div className="flex min-h-screen items-center justify-center text-faint">Загрузка…</div>;
   }
 
   if (state === 'denied') {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-4 px-6 text-center">
-        <h1 className="text-xl font-semibold text-gray-900">Этот раздел вам не открыт</h1>
-        <p className="text-gray-600">Доступ выдаёт администратор. Попросите его изменить вашу роль.</p>
+        <h1 className="text-xl font-semibold text-ink">Этот раздел вам не открыт</h1>
+        <p className="text-muted">Доступ выдаёт администратор. Попросите его изменить вашу роль.</p>
         <button
           onClick={() => router.replace('/dashboard')}
-          className="rounded-lg bg-gray-900 px-4 py-2 text-white hover:bg-gray-700"
+          className="rounded-lg bg-brass px-4 py-2 text-on-brass hover:bg-brass-bright"
         >
           К моим разделам
         </button>

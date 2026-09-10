@@ -58,7 +58,7 @@ function Screen({ user }: { user: User }) {
   }, [load, chosen]);
 
   if (!data) {
-    return <Shell title="Мой цех">{error ? <Alert text={error} /> : <p className="text-gray-500">Загрузка…</p>}</Shell>;
+    return <Shell title="Мой цех">{error ? <Alert text={error} /> : <p className="text-faint">Загрузка…</p>}</Shell>;
   }
 
   // У администратора своего цеха нет - ему нужен выбор, иначе страницу нечем наполнить
@@ -66,7 +66,7 @@ function Screen({ user }: { user: User }) {
     <select
       value={chosen || data.workshop?.id || ''}
       onChange={(e) => setChosen(e.target.value)}
-      className="rounded border border-gray-300 px-3 py-2 text-sm"
+      className="rounded border border-line px-3 py-2 text-sm"
     >
       <option value="">Выберите цех</option>
       {data.workshops.map((w) => (
@@ -96,7 +96,7 @@ function Screen({ user }: { user: User }) {
     <Shell title={data.workshop.name} subtitle="Задачи, стоящие сейчас в вашем цехе" right={picker}>
       {error && <Alert text={error} />}
       {notice && (
-        <div className="mb-4 rounded border border-green-400 bg-green-50 p-3 text-sm text-green-800">{notice}</div>
+        <div className="mb-4 rounded border border-ok bg-ok/10 p-3 text-sm text-ok">{notice}</div>
       )}
 
       {data.tasks.length === 0 ? (
@@ -164,50 +164,50 @@ function TaskCard({
   const progress = Math.round((task.doneHere / task.quantity) * 100);
 
   return (
-    <div className="rounded-lg bg-white p-4 shadow">
+    <div className="rounded-lg bg-surface p-4 shadow-flat">
       <div className="flex gap-4">
         {task.imageUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={task.imageUrl} alt="" className="h-24 w-24 shrink-0 rounded object-cover" />
         ) : (
-          <div className="flex h-24 w-24 shrink-0 items-center justify-center rounded bg-gray-100 text-xs text-gray-400">
+          <div className="flex h-24 w-24 shrink-0 items-center justify-center rounded bg-canvas text-xs text-faint">
             без фото
           </div>
         )}
 
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-lg font-semibold text-gray-900">{task.name}</h3>
-            <span className="rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-600">
+            <h3 className="text-lg font-semibold text-ink">{task.name}</h3>
+            <span className="rounded bg-canvas px-2 py-0.5 text-xs text-muted">
               {PRODUCTION_ITEM_STATUS_LABELS[task.status] || task.status}
             </span>
             {task.defectsHere > 0 && (
-              <span className="rounded bg-red-100 px-2 py-0.5 text-xs text-red-800">
+              <span className="rounded bg-danger/10 px-2 py-0.5 text-xs text-danger">
                 брак: {task.defectsHere}
               </span>
             )}
           </div>
 
-          {task.code && <div className="text-sm text-gray-500">{task.code}</div>}
-          {task.notes && <p className="mt-1 text-sm text-gray-600">{task.notes}</p>}
+          {task.code && <div className="text-sm text-faint">{task.code}</div>}
+          {task.notes && <p className="mt-1 text-sm text-muted">{task.notes}</p>}
 
           <div className="mt-3">
-            <div className="mb-1 flex justify-between text-sm text-gray-700">
+            <div className="mb-1 flex justify-between text-sm text-muted">
               <span>
                 Сделано {task.doneHere} из {task.quantity} {task.unit}
               </span>
               <span className="font-semibold">осталось {task.remaining}</span>
             </div>
-            <div className="h-2 w-full overflow-hidden rounded bg-gray-200">
-              <div className="h-full bg-blue-600" style={{ width: `${progress}%` }} />
+            <div className="h-2 w-full overflow-hidden rounded bg-lifted">
+              <div className="h-full bg-brass" style={{ width: `${progress}%` }} />
             </div>
           </div>
         </div>
       </div>
 
-      <div className="mt-4 flex flex-wrap items-end gap-3 border-t border-gray-100 pt-4">
+      <div className="mt-4 flex flex-wrap items-end gap-3 border-t border-line-soft pt-4">
         <label className="block">
-          <span className="text-sm font-medium text-gray-700">Сколько {task.unit}</span>
+          <span className="text-sm font-medium text-muted">Сколько {task.unit}</span>
           <input
             type="number"
             inputMode="numeric"
@@ -215,23 +215,23 @@ function TaskCard({
             max={task.remaining}
             value={quantity}
             onChange={(e) => setQuantity(e.target.value)}
-            className="mt-1 w-28 rounded-lg border border-gray-300 px-3 py-2 text-lg"
+            className="mt-1 w-28 rounded-lg border border-line px-3 py-2 text-lg"
           />
         </label>
 
-        <label className="flex items-center gap-2 pb-2 text-sm text-gray-700">
+        <label className="flex items-center gap-2 pb-2 text-sm text-muted">
           <input type="checkbox" checked={defect} onChange={(e) => setDefect(e.target.checked)} className="h-4 w-4" />
           это брак
         </label>
 
         {defect && (
           <label className="block flex-1">
-            <span className="text-sm font-medium text-gray-700">Что случилось</span>
+            <span className="text-sm font-medium text-muted">Что случилось</span>
             <input
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               placeholder="скол на кромке, сверло ушло в сторону…"
-              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2"
+              className="mt-1 w-full rounded-lg border border-line px-3 py-2"
             />
           </label>
         )}
@@ -239,8 +239,8 @@ function TaskCard({
         <button
           onClick={submit}
           disabled={busy || task.remaining === 0}
-          className={`rounded-lg px-6 py-3 font-semibold text-white disabled:opacity-50 ${
-            defect ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'
+          className={`rounded-lg px-6 py-3 font-semibold text-on-brass disabled:opacity-50 ${
+            defect ? 'bg-danger hover:bg-danger' : 'bg-brass hover:bg-brass-bright'
           }`}
         >
           {busy ? 'Записываем…' : defect ? 'Записать брак' : 'Готово'}
@@ -262,16 +262,16 @@ function Shell({
   children: React.ReactNode;
 }) {
   return (
-    <div className="min-h-screen bg-gray-100">
-      <nav className="bg-white shadow-sm">
+    <div className="min-h-screen">
+      <nav className="sticky top-0 z-40 border-b border-line bg-[var(--topbar-bg)] backdrop-blur-md">
         <div className="mx-auto flex max-w-4xl flex-wrap items-center justify-between gap-3 px-4 py-4">
           <div>
-            <h1 className="text-xl font-bold text-gray-900">{title}</h1>
-            {subtitle && <p className="text-sm text-gray-500">{subtitle}</p>}
+            <h1 className="text-xl font-bold text-ink">{title}</h1>
+            {subtitle && <p className="text-sm text-faint">{subtitle}</p>}
           </div>
           <div className="flex items-center gap-4">
             {right}
-            <Link href="/dashboard" className="text-sm text-blue-600 hover:underline">
+            <Link href="/dashboard" className="text-sm text-brass hover:underline">
               ← Ко всем разделам
             </Link>
           </div>
@@ -283,14 +283,14 @@ function Shell({
 }
 
 function Alert({ text }: { text: string }) {
-  return <div className="mb-4 rounded border border-red-400 bg-red-100 p-3 text-sm text-red-700">{text}</div>;
+  return <div className="mb-4 rounded border border-danger bg-danger/10 p-3 text-sm text-danger">{text}</div>;
 }
 
 function Empty({ title, text }: { title: string; text: string }) {
   return (
-    <div className="rounded-lg bg-white p-8 text-center shadow">
-      <h2 className="mb-2 text-lg font-semibold text-gray-900">{title}</h2>
-      <p className="text-gray-600">{text}</p>
+    <div className="rounded-lg bg-surface p-8 text-center shadow-flat">
+      <h2 className="mb-2 text-lg font-semibold text-ink">{title}</h2>
+      <p className="text-muted">{text}</p>
     </div>
   );
 }

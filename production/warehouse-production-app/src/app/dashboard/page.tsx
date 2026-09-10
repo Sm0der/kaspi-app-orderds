@@ -3,6 +3,7 @@
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Protected from '@/components/Protected';
+import ThemePicker from '@/components/ThemePicker';
 import { clearSession } from '@/lib/session';
 import { can, Area, roleLabel } from '@/lib/roles';
 import type { User } from '@/types';
@@ -67,16 +68,17 @@ function Dashboard({ user }: { user: User }) {
   const available = TILES.filter((tile) => can(user.role, tile.area));
 
   return (
-    <div className="min-h-screen bg-gray-100">
-      <nav className="bg-white shadow-sm">
+    <div className="min-h-screen">
+      <nav className="sticky top-0 z-40 border-b border-line bg-[var(--topbar-bg)] backdrop-blur-md">
         <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3 px-4 py-4">
-          <h1 className="text-xl font-bold text-gray-900">Производство и склад</h1>
+          <h1 className="text-xl font-bold text-ink">Производство и склад</h1>
           <div className="flex items-center gap-4">
             <div className="text-right">
-              <div className="text-sm font-medium text-gray-900">{user.fullName}</div>
-              <div className="text-xs text-gray-500">{roleLabel(user.role)}</div>
+              <div className="text-sm font-medium text-ink">{user.fullName}</div>
+              <div className="text-xs text-faint">{roleLabel(user.role)}</div>
             </div>
-            <Link href="/profile/password" className="text-sm text-blue-600 hover:underline">
+            <ThemePicker />
+            <Link href="/profile/password" className="text-sm text-brass hover:underline">
               Сменить пароль
             </Link>
             <button
@@ -84,7 +86,7 @@ function Dashboard({ user }: { user: User }) {
                 clearSession();
                 router.replace('/login');
               }}
-              className="rounded bg-gray-900 px-4 py-2 text-sm text-white hover:bg-gray-700"
+              className="rounded bg-brass px-4 py-2 text-sm text-on-brass hover:bg-brass-bright"
             >
               Выйти
             </button>
@@ -94,9 +96,9 @@ function Dashboard({ user }: { user: User }) {
 
       <main className="mx-auto max-w-5xl px-4 py-8">
         {available.length === 0 ? (
-          <div className="rounded-lg bg-white p-8 text-center shadow">
-            <h2 className="mb-2 text-lg font-semibold text-gray-900">Разделов для вашей роли пока нет</h2>
-            <p className="text-gray-600">
+          <div className="rounded-lg bg-surface p-8 text-center shadow-flat">
+            <h2 className="mb-2 text-lg font-semibold text-ink">Разделов для вашей роли пока нет</h2>
+            <p className="text-muted">
               Экраны цехов ещё не сделаны. Как только они появятся, эта страница откроет их без вашего участия.
             </p>
           </div>
@@ -120,13 +122,13 @@ function Dashboard({ user }: { user: User }) {
   );
 }
 
-const tileClass = 'block rounded-lg bg-white p-6 shadow transition-shadow hover:shadow-lg';
+const tileClass = 'block rounded-lg bg-surface p-6 shadow-flat transition-shadow hover:shadow-card';
 
 function Tile({ title, description }: { title: string; description: string }) {
   return (
     <>
-      <h4 className="mb-2 text-lg font-semibold text-gray-900">{title}</h4>
-      <p className="text-gray-600">{description}</p>
+      <h4 className="mb-2 text-lg font-semibold text-ink">{title}</h4>
+      <p className="text-muted">{description}</p>
     </>
   );
 }

@@ -92,13 +92,13 @@ export default function ReceivePage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-100">
-      <nav className="bg-white shadow-sm">
+    <div className="min-h-screen">
+      <nav className="sticky top-0 z-40 border-b border-line bg-[var(--topbar-bg)] backdrop-blur-md">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
-          <h1 className="text-2xl font-bold text-gray-900">Приём товара</h1>
+          <h1 className="text-2xl font-bold text-ink">Приём товара</h1>
           <button
             onClick={() => router.push('/dashboard')}
-            className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700"
+            className="px-4 py-2 rounded border border-line text-muted transition-colors hover:bg-raised hover:text-ink"
           >
             Назад
           </button>
@@ -106,30 +106,30 @@ export default function ReceivePage() {
       </nav>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="bg-white rounded-lg shadow-md p-6 mb-8">
+        <div className="bg-surface rounded-lg shadow-card p-6 mb-8">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-xl font-bold">Сканирование штрихкода</h2>
             <button
               type="button"
               onClick={() => setShowCamera((v) => !v)}
-              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg flex items-center gap-2"
+              className="px-4 py-2 border border-line text-muted text-sm font-medium rounded-lg flex items-center gap-2 transition-colors hover:bg-raised hover:text-ink"
             >
               📷 {showCamera ? 'Скрыть камеру' : 'Сканировать камерой'}
             </button>
           </div>
-          <p className="text-gray-600 mb-4">
+          <p className="text-muted mb-4">
             Используйте камеру телефона/планшета или подключённый USB/Bluetooth-сканер
             (сработает прямо в поле ввода ниже).
           </p>
 
           {error && (
-            <div className="mb-4 p-4 bg-red-100 border border-red-400 text-red-700 rounded">
+            <div className="mb-4 p-4 bg-danger/10 border border-danger text-danger rounded">
               {error}
             </div>
           )}
 
           {success && (
-            <div className="mb-4 p-4 bg-green-100 border border-green-400 text-green-700 rounded">
+            <div className="mb-4 p-4 bg-ok/10 border border-ok text-ok rounded">
               ✓ {success}
             </div>
           )}
@@ -142,7 +142,7 @@ export default function ReceivePage() {
 
           <form onSubmit={handleScan} className="space-y-4">
             <div>
-              <label htmlFor="barcode" className="block text-sm font-medium text-gray-700 mb-2">
+              <label htmlFor="barcode" className="block text-sm font-medium text-muted mb-2">
                 Штрихкод
               </label>
               <input
@@ -151,7 +151,7 @@ export default function ReceivePage() {
                 type="text"
                 value={barcodeInput}
                 onChange={(e) => setBarcodeInput(e.target.value)}
-                className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
+                className="w-full px-4 py-3 border-2 border-line rounded-lg focus:outline-none focus:border-brass focus:ring-2 focus:ring-brass-wash"
                 placeholder="Отсканируйте штрихкод..."
                 disabled={loading}
                 autoComplete="off"
@@ -161,22 +161,22 @@ export default function ReceivePage() {
             <button
               type="submit"
               disabled={loading || !barcodeInput}
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg transition duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full bg-brass hover:bg-brass-bright text-on-brass font-bold py-3 px-4 rounded-lg transition duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {loading ? 'Обработка...' : 'Подтвердить'}
             </button>
           </form>
         </div>
 
-        <div className="bg-white rounded-lg shadow-md p-6">
+        <div className="bg-surface rounded-lg shadow-card p-6">
           <h2 className="text-xl font-bold mb-4">Недавние приёмки ({movements.length})</h2>
 
           {movements.length === 0 ? (
-            <p className="text-gray-600">Пока ничего не принято.</p>
+            <p className="text-muted">Пока ничего не принято.</p>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full">
-                <thead className="bg-gray-100">
+                <thead className="bg-canvas">
                   <tr>
                     <th className="px-4 py-2 text-left">Время</th>
                     <th className="px-4 py-2 text-left">Штрихкод</th>
@@ -186,7 +186,7 @@ export default function ReceivePage() {
                 </thead>
                 <tbody>
                   {movements.map((movement) => (
-                    <tr key={movement.movementId} className="border-b hover:bg-gray-50">
+                    <tr key={movement.movementId} className="border-b hover:bg-raised">
                       <td className="px-4 py-2 text-sm">
                         {movement.timestamp.toLocaleTimeString()}
                       </td>

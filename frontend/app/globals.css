@@ -1,50 +1,97 @@
 /* ============================================================================
-   Панель отгрузок Kaspi — тёмная «мастерская»: тёплый графит, латунный акцент,
-   плотная сетка. Инструмент, за которым сидят весь день, поэтому ставка на
-   читаемость данных и спокойный фон, а не на эффекты.
+   ARTROOM/OPS — «мастерская». Тёмная тема: тёплый графит и латунь. Светлая: та же
+   латунь на тёплой бумаге. Инструмент, за которым сидят весь день, поэтому ставка
+   на читаемость данных и спокойный фон, а не на эффекты.
+
+   Тему выбирает человек (см. app/lib/theme.js): атрибут data-theme на <html>
+   переключает color-scheme, а все цвета собраны функцией light-dark() - у каждого
+   ровно одно определение с двумя значениями рядом. Два отдельных блока :root
+   пришлось бы править парой, и однажды они бы разошлись. Без атрибута решает
+   системная настройка, поэтому при загрузке нет вспышки чужой темы.
+
+   Ровно тот же набор токенов продублирован в приложении склада
+   (production/warehouse-production-app/src/app/globals.css): это разные деплои,
+   общего пакета у них нет, но язык обязан совпадать - иначе «один фронт» распадётся.
    ========================================================================= */
 
 :root {
-  /* Поверхности: тёплый чёрный, а не синеватый - под мебельную тематику */
-  --ink-900: #0B0A08;
-  --ink-850: #100E0C;
-  --ink-800: #15120F;
-  --ink-700: #1C1815;
-  --ink-600: #241F1A;
+  /* Обе темы разрешены, поэтому light-dark() ниже следует системной настройке,
+     пока человек не выбрал своё */
+  color-scheme: light dark;
 
-  --line: #2A241E;
-  --line-soft: #201B17;
-  --line-strong: #3B332B;
+  /* Слои поверхностей: 900 - самый дальний (фон страницы), 600 - самый близкий.
+     Имена про глубину, а не про темноту: в светлой теме числа те же, а цвета
+     светлеют в обратную сторону. Оттенок тёплый, не синеватый - под мебель. */
+  --ink-900: light-dark(#F2EDE3, #0B0A08);
+  --ink-850: light-dark(#EDE7DB, #100E0C);
+  --ink-800: light-dark(#FBF8F2, #15120F);
+  --ink-700: light-dark(#E9E2D4, #1C1815);
+  --ink-600: light-dark(#DFD6C4, #241F1A);
 
-  --text: #F1EBE1;
-  --text-dim: #A79C8D;
-  --text-faint: #6E655A;
+  --line: light-dark(#D9CFBB, #2A241E);
+  --line-soft: light-dark(#E7E0D1, #201B17);
+  --line-strong: light-dark(#C2B49A, #3B332B);
 
-  /* Латунь — единственный «активный» цвет: кнопки, фокус, выделение */
-  --brass: #D6A756;
-  --brass-bright: #EFC57E;
-  --brass-deep: #A87F38;
-  --brass-wash: rgba(214, 167, 86, 0.12);
-  --brass-line: rgba(214, 167, 86, 0.32);
+  --text: light-dark(#241E16, #F1EBE1);
+  --text-dim: light-dark(#6B6153, #A79C8D);
+  --text-faint: light-dark(#948A79, #6E655A);
+
+  /* Латунь — единственный «активный» цвет: кнопки, фокус, выделение.
+     На бумаге тот же тон читался бы бледно, поэтому в светлой теме он глубже. */
+  --brass: light-dark(#B98B36, #D6A756);
+  --brass-bright: light-dark(#D6A756, #EFC57E);
+  --brass-deep: light-dark(#8E6A24, #A87F38);
+  --brass-wash: light-dark(rgba(185, 139, 54, 0.14), rgba(214, 167, 86, 0.12));
+  --brass-line: light-dark(rgba(185, 139, 54, 0.38), rgba(214, 167, 86, 0.32));
+  /* Текст на латунной заливке — тёмный в обеих темах: сама латунь не меняет светлоту */
+  --on-brass: #17120A;
+  /* Латунь как ТЕКСТ поверх бледной подложки (активный чип, ссылка под курсором).
+     «Ярче» - это усиление только на тёмном фоне; на бумаге усиление идёт в глубину,
+     иначе подсвеченный элемент выглядит бледнее обычного. */
+  --brass-strong: light-dark(#7C5C1E, #EFC57E);
 
   /* Смысловые цвета — только в точках и бейджах, чтобы не спорить с латунью */
-  --red: #E0574C;
-  --amber: #E39A3B;
-  --steel: #7196BC;
-  --sage: #7FA07F;
-  --slate: #7C736A;
-  --violet: #A98BC4;
+  --red: light-dark(#B23A2E, #E0574C);
+  --amber: light-dark(#9C6A12, #E39A3B);
+  --steel: light-dark(#3E6A96, #7196BC);
+  --sage: light-dark(#4F7A4F, #7FA07F);
+  --slate: light-dark(#6D6459, #7C736A);
+  --violet: light-dark(#7A56A2, #A98BC4);
+
+  --alert-error-bg: light-dark(rgba(178, 58, 46, 0.08), rgba(224, 87, 76, 0.09));
+  --alert-error-line: light-dark(rgba(178, 58, 46, 0.28), rgba(224, 87, 76, 0.3));
+  --alert-error-text: light-dark(#8E2A20, #F0A49D);
+  --alert-ok-bg: light-dark(rgba(79, 122, 79, 0.09), rgba(127, 160, 127, 0.09));
+  --alert-ok-line: light-dark(rgba(79, 122, 79, 0.28), rgba(127, 160, 127, 0.3));
+  --alert-ok-text: light-dark(#37592F, #A9C6A9);
+
+  /* Полупрозрачные поверхности и подсветки, зависящие от фона */
+  --topbar-bg: light-dark(rgba(250, 247, 240, 0.86), rgba(11, 10, 8, 0.82));
+  --row-hover: light-dark(rgba(185, 139, 54, 0.07), rgba(214, 167, 86, 0.045));
+  --glow-warm: light-dark(rgba(185, 139, 54, 0.13), rgba(214, 167, 86, 0.10));
+  --glow-cool: light-dark(rgba(62, 106, 150, 0.06), rgba(113, 150, 188, 0.06));
+  --veil-near: light-dark(rgba(242, 237, 227, 0.34), rgba(11, 10, 8, 0.28));
+  --veil-far: light-dark(rgba(242, 237, 227, 0.92), rgba(11, 10, 8, 0.92));
 
   --radius-sm: 6px;
   --radius: 10px;
   --radius-lg: 14px;
 
-  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --shadow-2: 0 8px 24px -12px rgba(0, 0, 0, 0.7);
-  --shadow-3: 0 24px 48px -20px rgba(0, 0, 0, 0.8);
+  /* Тень тонируется фоном, а не чистым чёрным: на бумаге чёрная тень выглядит грязью */
+  --shadow-tint-1: light-dark(rgba(72, 56, 28, 0.10), rgba(0, 0, 0, 0.4));
+  --shadow-tint-2: light-dark(rgba(72, 56, 28, 0.24), rgba(0, 0, 0, 0.7));
+  --shadow-tint-3: light-dark(rgba(72, 56, 28, 0.30), rgba(0, 0, 0, 0.8));
+  --shadow-1: 0 1px 2px var(--shadow-tint-1);
+  --shadow-2: 0 8px 24px -12px var(--shadow-tint-2);
+  --shadow-3: 0 24px 48px -20px var(--shadow-tint-3);
 
   --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
 }
+
+/* Явный выбор человека. Меняется только color-scheme - все light-dark() выше
+   пересчитываются сами, включая нативные скроллбары и выпадающие списки. */
+:root[data-theme='light'] { color-scheme: light; }
+:root[data-theme='dark'] { color-scheme: dark; }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -57,8 +104,8 @@ body {
   background-color: var(--ink-900);
   /* Мягкий тёплый свет сверху слева + едва заметная сетка: глубина без «космоса» */
   background-image:
-    radial-gradient(900px 500px at 12% -8%, rgba(214, 167, 86, 0.10), transparent 70%),
-    radial-gradient(700px 400px at 92% 0%, rgba(113, 150, 188, 0.06), transparent 70%),
+    radial-gradient(900px 500px at 12% -8%, var(--glow-warm), transparent 70%),
+    radial-gradient(700px 400px at 92% 0%, var(--glow-cool), transparent 70%),
     linear-gradient(var(--line-soft) 1px, transparent 1px),
     linear-gradient(90deg, var(--line-soft) 1px, transparent 1px);
   background-size: auto, auto, 72px 72px, 72px 72px;
@@ -68,18 +115,26 @@ body {
   font-feature-settings: 'ss01', 'cv01';
 }
 
-/* Зерно поверх всего: убирает «пластиковость» плоских заливок */
+/* Зерно поверх всего: убирает «пластиковость» плоских заливок.
+   Единственное место, где темы расходятся не цветом: на бумаге overlay высветляет
+   и зерно пропадает, поэтому там multiply и вдвое слабее - светлая тема вообще
+   требует меньше текстуры, чтобы не выглядеть грязной. */
 .grain {
   position: fixed;
   inset: 0;
   pointer-events: none;
   z-index: 100;
-  opacity: 0.035;
-  mix-blend-mode: overlay;
+  opacity: 0.018;
+  mix-blend-mode: multiply;
   background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 220 220' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
-::selection { background: var(--brass); color: #17120A; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .grain { opacity: 0.035; mix-blend-mode: overlay; }
+}
+:root[data-theme='dark'] .grain { opacity: 0.035; mix-blend-mode: overlay; }
+
+::selection { background: var(--brass); color: var(--on-brass); }
 
 /* ── Типографика ─────────────────────────────────────────────────────────── */
 
@@ -99,7 +154,7 @@ h2 { font-size: 17px; }
 h3 { font-size: 15px; }
 
 a { color: var(--brass); text-decoration: none; }
-a:hover { color: var(--brass-bright); }
+a:hover { color: var(--brass-strong); }
 
 /* ── Каркас ──────────────────────────────────────────────────────────────── */
 
@@ -114,7 +169,7 @@ a:hover { color: var(--brass-bright); }
   gap: 20px;
   padding: 14px 28px;
   margin-bottom: 26px;
-  background: rgba(11, 10, 8, 0.82);
+  background: var(--topbar-bg);
   backdrop-filter: blur(14px) saturate(140%);
   border-bottom: 1px solid var(--line);
 }
@@ -159,7 +214,7 @@ a:hover { color: var(--brass-bright); }
 .segmented button:hover { color: var(--text); }
 .segmented button[data-active='true'] {
   background: linear-gradient(180deg, var(--brass) 0%, var(--brass-deep) 100%);
-  color: #17120A;
+  color: var(--on-brass);
   font-weight: 600;
   box-shadow: var(--shadow-1);
 }
@@ -190,7 +245,7 @@ a:hover { color: var(--brass-bright); }
 .btn-primary {
   background: linear-gradient(180deg, var(--brass) 0%, var(--brass-deep) 100%);
   border-color: var(--brass-deep);
-  color: #17120A;
+  color: var(--on-brass);
   font-weight: 600;
 }
 .btn-primary:hover:not(:disabled) {
@@ -201,7 +256,7 @@ a:hover { color: var(--brass-bright); }
 .btn-quiet { background: transparent; border-color: transparent; color: var(--text-dim); }
 .btn-quiet:hover:not(:disabled) { background: var(--ink-700); color: var(--text); border-color: var(--line); }
 
-.btn-danger:hover:not(:disabled) { border-color: var(--red); color: var(--red); background: rgba(224, 87, 76, 0.08); }
+.btn-danger:hover:not(:disabled) { border-color: var(--red); color: var(--red); background: color-mix(in srgb, var(--red) 10%, transparent); }
 
 .btn-sm { padding: 5px 10px; font-size: 12px; }
 .btn-icon { padding: 7px; }
@@ -235,8 +290,17 @@ a:hover { color: var(--brass-bright); }
 }
 .textarea { resize: vertical; min-height: 76px; line-height: 1.5; }
 .select { cursor: pointer; }
+.select-sm { padding: 5px 8px; font-size: 12px; }
 .input[type='date'] { font-family: var(--font-mono), monospace; font-size: 12.5px; }
-.input::-webkit-calendar-picker-indicator { filter: invert(0.7) sepia(0.4); cursor: pointer; }
+/* Иконку календаря рисует сам браузер, тёмной её делает только инверсия - в светлой
+   теме инвертировать нечего, там она и так тёмная */
+.input::-webkit-calendar-picker-indicator { cursor: pointer; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .input::-webkit-calendar-picker-indicator { filter: invert(0.7) sepia(0.4); }
+}
+:root[data-theme='dark'] .input::-webkit-calendar-picker-indicator { filter: invert(0.7) sepia(0.4); }
+
+.theme-picker { display: inline-flex; align-items: center; gap: 7px; }
 
 /* ── Панели ──────────────────────────────────────────────────────────────── */
 
@@ -343,7 +407,7 @@ a:hover { color: var(--brass-bright); }
 .chip[data-active='true'] {
   background: var(--brass-wash);
   border-color: var(--brass-line);
-  color: var(--brass-bright);
+  color: var(--brass-strong);
   font-weight: 500;
 }
 .chip .count {
@@ -414,7 +478,7 @@ table.data th {
 }
 table.data td { padding: 11px 12px; border-bottom: 1px solid var(--line-soft); vertical-align: top; }
 table.data tbody tr { transition: background 0.12s var(--ease); }
-table.data tbody tr:hover { background: rgba(214, 167, 86, 0.045); }
+table.data tbody tr:hover { background: var(--row-hover); }
 table.data tbody tr:last-child td { border-bottom: 0; }
 .num { font-family: var(--font-mono), monospace; font-variant-numeric: tabular-nums; }
 .t-dim { color: var(--text-dim); }
@@ -546,8 +610,8 @@ table.data tbody tr:last-child td { border-bottom: 0; }
   font-size: 13px;
   border: 1px solid;
 }
-.alert-error { background: rgba(224, 87, 76, 0.09); border-color: rgba(224, 87, 76, 0.3); color: #F0A49D; }
-.alert-ok { background: rgba(127, 160, 127, 0.09); border-color: rgba(127, 160, 127, 0.3); color: #A9C6A9; }
+.alert-error { background: var(--alert-error-bg); border-color: var(--alert-error-line); color: var(--alert-error-text); }
+.alert-ok { background: var(--alert-ok-bg); border-color: var(--alert-ok-line); color: var(--alert-ok-text); }
 
 .spinner {
   width: 15px; height: 15px;
@@ -601,7 +665,7 @@ table.data tbody tr:last-child td { border-bottom: 0; }
   content: '';
   position: absolute;
   inset: 0;
-  background: radial-gradient(820px 560px at 50% 48%, rgba(11, 10, 8, 0.28), rgba(11, 10, 8, 0.92) 74%);
+  background: radial-gradient(820px 560px at 50% 48%, var(--veil-near), var(--veil-far) 74%);
 }
 @keyframes slow-zoom {
   from { transform: scale(1); }
