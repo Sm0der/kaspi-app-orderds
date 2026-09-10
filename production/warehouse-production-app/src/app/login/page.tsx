@@ -44,9 +44,26 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-canvas">
-      <div className="bg-surface p-8 rounded-lg shadow-card w-full max-w-md">
-        <h1 className="text-2xl font-bold mb-6 text-center">Учёт производства и склада</h1>
+    <div className="flex min-h-screen items-center justify-center px-4">
+      <div className="w-full max-w-md rounded-lg border border-line bg-surface p-8 shadow-card">
+        {/* Тот же знак и та же подпись, что на входе в заказы: вход в системе один,
+            и человек не должен гадать, туда ли он попал. Файл лежит в обоих
+            приложениях - на общем домене хватило бы одного, но склад открывается
+            и по собственному адресу, где чужой /brand/ не отдаётся. */}
+        <div className="mb-1 flex items-baseline justify-center gap-2">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={`${process.env.NEXT_PUBLIC_BASE_PATH || ''}/brand/mark.webp`}
+            alt=""
+            className="h-5 w-5 self-center"
+          />
+          <span className="brand-mark text-[15px] text-ink">
+            ARTROOM<span className="mx-1.5 text-brass">/</span>OPS
+          </span>
+        </div>
+        <p className="mb-7 text-center text-[10px] tracking-[0.16em] text-faint uppercase">
+          Склад и производство
+        </p>
 
         {error && (
           <div className="mb-4 p-4 bg-danger/10 border border-danger text-danger rounded">
