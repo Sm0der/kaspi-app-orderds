@@ -10,8 +10,7 @@ export default function TopBar({
   lastSyncAt,
   onSync,
   onLogout,
-  isAdmin,
-  onOpenAccess
+  isAdmin
 }) {
   return (
     <header className="topbar">
@@ -68,10 +67,17 @@ export default function TopBar({
         </span>
       )}
 
+      {/* Склад - соседнее приложение в разделе /sklad того же домена. Обычная ссылка,
+          а не переключатель режима: это другой деплой, но для человека тот же сайт,
+          и вход общий - повторно логиниться не придётся. */}
+      <a className="btn btn-quiet" href="/sklad/dashboard" title="Этикетки, приёмка, отгрузка">
+        Склад
+      </a>
+
       {isAdmin && (
-        <button className="btn btn-quiet btn-icon" onClick={onOpenAccess} title="Доступ сотрудников">
+        <a className="btn btn-quiet btn-icon" href="/sklad/admin/users" title="Сотрудники и доступы">
           <span aria-hidden="true">⚙</span>
-        </button>
+        </a>
       )}
 
       <button className="btn btn-quiet btn-icon" onClick={onLogout} title="Выйти">

@@ -1,10 +1,8 @@
-export type UserRole =
-  | 'ADMIN'
-  | 'WORKSHOP_WORKER'
-  | 'WORKSHOP_MASTER'
-  | 'WAREHOUSE_RECEIVER'
-  | 'WAREHOUSE_SHIPPER'
-  | 'MANAGER';
+// Список ролей живёт в src/lib/roles.ts вместе с их правами и названиями - здесь только тип,
+// чтобы справочник и типы не разошлись
+import type { Role } from '@/lib/roles';
+
+export type UserRole = Role;
 
 export interface User {
   id: string;
@@ -16,6 +14,8 @@ export interface User {
   /** Магазин из общей базы заказов, поэтому число, а не строка */
   storeId?: number;
   isActive: boolean;
+  /** Пароль выдан администратором: интерфейс уведёт на смену, пока не сменит */
+  mustChangePassword?: boolean;
   createdAt: Date;
 }
 

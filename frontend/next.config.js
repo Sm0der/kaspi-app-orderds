@@ -2,13 +2,24 @@
 const nextConfig = {
   reactStrictMode: true,
   env: {
-    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'https://kaspi-app-orderds-api.vercel.app',
-    // Supabase URL и anon-ключ безопасно иметь как дефолт в коде - anon-ключ специально
-    // предназначен светиться в браузере, реальный доступ к данным проверяется на бэкенде
-    // (server/middleware/requireAuth.js). Это позволяет не настраивать Environment Variables
-    // в Vercel вручную - см. также .env.example, если нужно указать другой проект Supabase.
-    NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://aiatnvqgghdkzrbuqcmw.supabase.co',
-    NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFpYXRudnFnZ2hka3pyYnVxY213Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODgyNTAwMTEsImV4cCI6MjEwMzgyNjAxMX0.UEE2eYd2WX4pLwFe2r0qSiIuhFr47_OO3Gw-HG-PJ6k'
+    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'https://kaspi-app-orderds-api.vercel.app'
+    // Ключей Supabase здесь больше нет: вход перестал ходить в Supabase Auth, а к базе
+    // дашборд обращается только через свой бэкенд.
+  },
+
+  // Склад и производство - отдельное приложение (Next 16 + Prisma) и отдельный деплой,
+  // но для человека это один сайт: /sklad проксируется туда. Так у системы один адрес
+  // и один origin, а значит и один вход - токен в localStorage общий для обеих частей.
+  //
+  // Само приложение склада собрано с basePath: '/sklad', поэтому путь не срезаем:
+  // /sklad/... уходит как /sklad/..., включая его статику /sklad/_next/...
+  async rewrites() {
+    const warehouse = process.env.WAREHOUSE_URL || 'https://kaspi-app-orderds-warehouse.vercel.app';
+
+    return [
+      { source: '/sklad', destination: `${warehouse}/sklad` },
+      { source: '/sklad/:path*', destination: `${warehouse}/sklad/:path*` }
+    ];
   }
 };
 

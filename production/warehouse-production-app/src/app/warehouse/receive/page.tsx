@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useRef } from 'react';
+import { apiUrl } from '@/lib/session';
 import { useRouter } from 'next/navigation';
 import BarcodeScanner from '@/components/BarcodeScanner';
 
@@ -45,7 +46,7 @@ export default function ReceivePage() {
 
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch('/api/warehouse/receive/scan-barcode', {
+      const response = await fetch(apiUrl('/api/warehouse/receive/scan-barcode'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

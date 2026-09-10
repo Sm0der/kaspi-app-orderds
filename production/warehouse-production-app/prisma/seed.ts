@@ -13,9 +13,10 @@ dotenv.config();
 
 const prisma = new PrismaClient();
 
+// Реальные этапы производства, названные владельцем, в порядке прохождения
 const WORKSHOPS = [
-  { orderSequence: 1, name: 'Раскрой', description: 'Раскрой материалов' },
-  { orderSequence: 2, name: 'Сборка', description: 'Сборка изделий' },
+  { orderSequence: 1, name: 'Закатка ПВХ', description: 'Оклейка кромки ПВХ' },
+  { orderSequence: 2, name: 'Присадка', description: 'Сверление под фурнитуру' },
   { orderSequence: 3, name: 'Упаковка', description: 'Упаковка готовых изделий' },
 ];
 
@@ -51,7 +52,9 @@ async function main() {
   }
   console.log(`Склады: ${warehouses.length}`);
 
-  // Пароль одинаковый только для первого запуска - сменить сразу после входа
+  // Стартовые учётки только для самого первого запуска. Пароль общий и потому помечен
+  // временным: система не пустит дальше формы смены пароля, пока человек не задаст свой.
+  // Остальных сотрудников заводит администратор в /sklad/admin/users, а не этот файл.
   const passwordHash = await bcryptjs.hash('warehouse2026', 10);
   for (const person of STAFF) {
     await prisma.productionUser.upsert({
@@ -60,11 +63,12 @@ async function main() {
       create: {
         ...person,
         passwordHash,
+        mustChangePassword: true,
         warehouseId: person.role === 'ADMIN' ? null : warehouses[0].id,
       },
     });
   }
-  console.log(`Сотрудники: ${STAFF.length} (пароль по умолчанию warehouse2026 — смените его)`);
+  console.log(`Сотрудники: ${STAFF.length} (временный пароль warehouse2026 — система попросит сменить)`);
 
   // Изделия, у которых ещё не проставлен склад, относим к основному: без склада
   // приёмка и отгрузка не смогут записать движение.

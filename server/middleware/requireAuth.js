@@ -1,33 +1,37 @@
-const { createClient } = require('@supabase/supabase-js');
+const jwt = require('jsonwebtoken');
 const db = require('../db/init');
 
-// Проверяем JWT из заголовка Authorization через сам Supabase Auth (getUser делает
-// запрос к auth-серверу и подтверждает, что токен подписан и не истёк) - не нужен
-// service role key, достаточно anon-ключа, т.к. мы только валидируем чужой токен.
+// Вход в системе один, и выдаёт токен приложение склада (production/warehouse-production-app,
+// раздел /sklad того же домена). Здесь мы токен только проверяем: тот же секрет, тот же
+// алгоритм - никаких сетевых запросов, в отличие от прежней проверки через Supabase Auth.
 //
-// URL нормализуем: реальный домен Supabase - ".supabase.co", а не ".supabase.com" -
-// это лёгкая опечатка при ручном вводе переменной окружения (одна лишняя буква),
-// из-за которой все запросы к auth-серверу падали с "fetch failed" (домен .com для
-// этого проекта не существует). URL - публичное значение (не секрет), поэтому
-// безопасно поправить его здесь же, не полагаясь на то, что в Vercel он введён без опечаток.
-const rawUrl = process.env.SUPABASE_URL || 'https://aiatnvqgghdkzrbuqcmw.supabase.co';
-const supabaseUrl = rawUrl.replace(/\.supabase\.com\/?$/i, '.supabase.co');
-const supabase = createClient(supabaseUrl, process.env.SUPABASE_ANON_KEY);
+// Секрет обязателен: без него любой смог бы подписать себе токен администратора, поэтому
+// молча подставлять значение по умолчанию нельзя - лучше честно не пускать никого.
+const JWT_SECRET = process.env.JWT_SECRET;
 
-// Роль ищем по почте в таблице app_users. Там перечислены исключения: по умолчанию
-// вошедший считается администратором, а менеджеров владелец добавляет явно. Обратный
-// порядок (всех неизвестных - в менеджеры) выглядит строже, но однажды оставит без
-// доступа к настройкам самого владельца, если он войдёт с другой почты.
+if (!JWT_SECRET) {
+  console.error('⚠️  JWT_SECRET не задан - вход работать не будет. Значение то же, что у приложения склада.');
+}
+
+// Ролей в системе семь (см. src/lib/roles.ts у склада), но дашборду заказов важны две:
+// владелец видит настройки, менеджер работает с заказами. Всем остальным - упаковщику,
+// кладовщику, цеху - здесь делать нечего, их место на складе.
+const DASHBOARD_ROLES = {
+  ADMIN: 'admin',
+  MANAGER: 'manager',
+};
+
 async function roleFor(email) {
-  if (!email) return 'admin';
+  if (!email) return null;
 
-  try {
-    const result = await db.query('SELECT role FROM app_users WHERE lower(email) = lower($1)', [email]);
-    return result.rows[0]?.role || 'admin';
-  } catch {
-    // Таблицы может не быть на самом первом запросе после деплоя - не повод не пускать
-    return 'admin';
-  }
+  const result = await db.query(
+    'SELECT role, is_active FROM production_users WHERE lower(email) = lower($1)',
+    [email]
+  );
+  const person = result.rows[0];
+  if (!person || !person.is_active) return null;
+
+  return DASHBOARD_ROLES[person.role] || null;
 }
 
 async function requireAuth(req, res, next) {
@@ -38,21 +42,35 @@ async function requireAuth(req, res, next) {
     return res.status(401).json({ error: 'Не авторизован' });
   }
 
+  if (!JWT_SECRET) {
+    return res.status(500).json({ error: 'Сервер не настроен: нет JWT_SECRET' });
+  }
+
+  let payload;
   try {
-    const { data, error } = await supabase.auth.getUser(token);
-    if (error || !data.user) {
-      return res.status(401).json({ error: 'Недействительный или истёкший токен' });
+    payload = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
+  } catch {
+    return res.status(401).json({ error: 'Недействительный или истёкший токен' });
+  }
+
+  try {
+    // Роль читаем из базы, а не из токена: токен живёт неделю, и уволенный сотрудник
+    // с уже выданным токеном иначе продолжал бы работать до самого истечения.
+    const role = await roleFor(payload.email);
+    if (!role) {
+      return res.status(403).json({ error: 'Этот раздел вам не открыт - вам на склад' });
     }
 
-    req.user = data.user;
-    req.userRole = await roleFor(data.user.email);
+    req.user = { id: payload.userId, email: payload.email };
+    req.userRole = role;
     next();
-  } catch (err) {
-    res.status(401).json({ error: 'Не удалось проверить токен' });
+  } catch (error) {
+    console.error('Auth lookup failed:', error);
+    res.status(500).json({ error: 'Не удалось проверить доступ' });
   }
 }
 
-// Настройки системы (правила упаковки, статусы CRM, доступы) - только владельцу.
+// Настройки системы (правила упаковки, статусы CRM) - только владельцу.
 // Менеджер работает с заказами: собирает, формирует накладные, двигает карточки.
 function requireAdmin(req, res, next) {
   if (req.userRole !== 'admin') {

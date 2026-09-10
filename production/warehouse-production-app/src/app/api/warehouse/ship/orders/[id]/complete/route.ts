@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { extractToken, verifyToken } from '@/lib/jwt';
+import { guard } from '@/lib/guard';
 import { loadOrderForPicking } from '@/lib/orders';
 import { ApiResponse } from '@/types';
 import { ORDER_PICKING_STATUS_LABELS } from '@/lib/labels';
@@ -10,21 +10,9 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const token = extractToken(request.headers.get('Authorization') || '');
-    if (!token) {
-      return NextResponse.json(
-        { success: false, error: 'Требуется авторизация' } as ApiResponse<null>,
-        { status: 401 }
-      );
-    }
-
-    const payload = await verifyToken(token);
-    if (!payload || !['WAREHOUSE_SHIPPER', 'ADMIN'].includes(payload.role)) {
-      return NextResponse.json(
-        { success: false, error: 'Недостаточно прав' } as ApiResponse<null>,
-        { status: 403 }
-      );
-    }
+    const auth = await guard(request, 'ship');
+    if (!auth.ok) return auth.response;
+    const payload = auth.user;
 
     const orderId = Number((await params).id);
     if (!Number.isInteger(orderId)) {

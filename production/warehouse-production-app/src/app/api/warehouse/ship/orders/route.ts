@@ -1,25 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { extractToken, verifyToken } from '@/lib/jwt';
+import { guard } from '@/lib/guard';
 import { loadOrdersForPicking } from '@/lib/orders';
 import { ApiResponse } from '@/types';
 
 export async function GET(request: NextRequest) {
   try {
-    const token = extractToken(request.headers.get('Authorization') || '');
-    if (!token) {
-      return NextResponse.json(
-        { success: false, error: 'Требуется авторизация' } as ApiResponse<null>,
-        { status: 401 }
-      );
-    }
-
-    const payload = await verifyToken(token);
-    if (!payload || !['WAREHOUSE_SHIPPER', 'ADMIN'].includes(payload.role)) {
-      return NextResponse.json(
-        { success: false, error: 'Недостаточно прав' } as ApiResponse<null>,
-        { status: 403 }
-      );
-    }
+    const auth = await guard(request, 'ship');
+    if (!auth.ok) return auth.response;
+    const payload = auth.user;
 
     const orders = await loadOrdersForPicking();
 

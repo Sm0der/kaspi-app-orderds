@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { extractToken, verifyToken } from '@/lib/jwt';
+import { guard } from '@/lib/guard';
 import { ApiResponse } from '@/types';
 
 const MAX_UNITS = 200;
@@ -16,14 +16,9 @@ function makeBarcodeValue(code: string): string {
 
 export async function POST(request: NextRequest) {
   try {
-    const token = extractToken(request.headers.get('Authorization') || '');
-    const payload = token ? await verifyToken(token) : null;
-    if (!payload || !['WAREHOUSE_RECEIVER', 'WORKSHOP_MASTER', 'ADMIN'].includes(payload.role)) {
-      return NextResponse.json(
-        { success: false, error: 'Недостаточно прав' } as ApiResponse<null>,
-        { status: 403 }
-      );
-    }
+    const auth = await guard(request, 'labels');
+    if (!auth.ok) return auth.response;
+    const payload = auth.user;
 
     const { warehouseItemId, units } = await request.json();
     const count = Number(units);

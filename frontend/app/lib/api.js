@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { supabase } from './supabaseClient';
+import { clearSession, getToken } from './session';
 
 export const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
@@ -8,13 +8,26 @@ export const API_URL = process.env.NEXT_PUBLIC_API_URL;
 // даже у самого первого запроса при загрузке страницы.
 export const api = axios.create({ baseURL: API_URL });
 
-api.interceptors.request.use(async (config) => {
-  const { data } = await supabase.auth.getSession();
-  if (data.session?.access_token) {
-    config.headers.Authorization = `Bearer ${data.session.access_token}`;
+api.interceptors.request.use((config) => {
+  const token = getToken();
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
   }
   return config;
 });
+
+// Токен живёт неделю и однажды истекает прямо посреди рабочего дня. Без этой обработки
+// человек видит подряд несколько красных плашек и не догадывается, что надо просто войти.
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error?.response?.status === 401) {
+      clearSession();
+      if (typeof window !== 'undefined') window.location.reload();
+    }
+    return Promise.reject(error);
+  }
+);
 
 // Текст ошибки от нашего API, от Kaspi или сетевой - в одном месте, чтобы в компонентах
 // не повторять одну и ту же цепочку проверок.

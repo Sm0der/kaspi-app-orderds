@@ -2,13 +2,12 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { api, errorText } from './lib/api';
-import { supabase } from './lib/supabaseClient';
+import { WAREHOUSE_PATH, clearSession, getUser } from './lib/session';
 import Login from './components/Login';
 import TopBar from './components/TopBar';
 import ShippingView from './components/ShippingView';
 import CrmBoard from './components/CrmBoard';
 import ArchiveView from './components/ArchiveView';
-import AccessPanel from './components/AccessPanel';
 
 const EMPTY_FILTERS = { product: '', dateFrom: '', dateTo: '', createdPreset: 'all' };
 
@@ -31,18 +30,26 @@ function createdRange(preset) {
   return [null, null];
 }
 
+// Заказы и накладные - для владельца и менеджера. Упаковщик, кладовщик или рабочий цеха
+// входит той же учёткой, но здесь ему делать нечего, поэтому сразу уводим на склад.
+const OFFICE_ROLES = ['ADMIN', 'MANAGER'];
+
 export default function Home() {
-  const [session, setSession] = useState(null);
+  const [user, setUser] = useState(null);
   const [checkingAuth, setCheckingAuth] = useState(true);
 
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session);
-      setCheckingAuth(false);
-    });
+  const enter = (person) => {
+    if (!OFFICE_ROLES.includes(person.role)) {
+      window.location.href = `${WAREHOUSE_PATH}/dashboard`;
+      return;
+    }
+    setUser(person);
+  };
 
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, next) => setSession(next));
-    return () => listener.subscription.unsubscribe();
+  useEffect(() => {
+    const saved = getUser();
+    if (saved) enter(saved);
+    setCheckingAuth(false);
   }, []);
 
   if (checkingAuth) {
@@ -53,9 +60,16 @@ export default function Home() {
     );
   }
 
-  if (!session) return <Login />;
+  if (!user) return <Login onSignedIn={enter} />;
 
-  return <Workspace onLogout={() => supabase.auth.signOut()} />;
+  return (
+    <Workspace
+      onLogout={() => {
+        clearSession();
+        setUser(null);
+      }}
+    />
+  );
 }
 
 function Workspace({ onLogout }) {
@@ -74,7 +88,6 @@ function Workspace({ onLogout }) {
 
   // Роль решает, показывать ли настройки: правила упаковки, статусы воронки, доступы
   const [me, setMe] = useState(null);
-  const [accessOpen, setAccessOpen] = useState(false);
   const isAdmin = me?.role !== 'manager';
 
   // Режим запоминаем: человек, работающий в CRM, не должен каждое утро переключаться вручную
@@ -156,15 +169,10 @@ function Workspace({ onLogout }) {
         onSync={runSync}
         onLogout={onLogout}
         isAdmin={isAdmin}
-        onOpenAccess={() => setAccessOpen((open) => !open)}
       />
 
       <div className="shell">
         {error && <div className="alert alert-error">{error}</div>}
-
-        {accessOpen && isAdmin && (
-          <AccessPanel myEmail={me?.email} onClose={() => setAccessOpen(false)} />
-        )}
 
         {mode === 'archive' ? (
           <ArchiveView />

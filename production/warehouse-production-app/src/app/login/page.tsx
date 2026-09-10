@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { saveSession, apiUrl } from '@/lib/session';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -16,7 +17,7 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      const response = await fetch('/api/auth/login', {
+      const response = await fetch(apiUrl('/api/auth/login'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
@@ -29,12 +30,11 @@ export default function LoginPage() {
         return;
       }
 
-      // Store token
-      localStorage.setItem('token', data.data.token);
-      localStorage.setItem('user', JSON.stringify(data.data.user));
+      saveSession(data.data.token, data.data.user);
 
-      // Redirect to dashboard
-      router.push('/dashboard');
+      // Пароль, выданный администратором, знает не только владелец учётки - меняем сразу,
+      // до того как человек попадёт в разделы
+      router.push(data.data.user.mustChangePassword ? '/profile/password' : '/dashboard');
     } catch (err) {
       setError('Произошла ошибка. Попробуйте ещё раз.');
       console.error(err);
@@ -65,7 +65,7 @@ export default function LoginPage() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className="mt-1 w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="admin@artroom.kz"
+              placeholder="почта, которую выдал администратор"
               disabled={loading}
               required
             />
@@ -96,13 +96,11 @@ export default function LoginPage() {
           </button>
         </form>
 
-        <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded text-sm text-gray-700">
-          <p className="font-semibold mb-2">Учётные записи после первого запуска:</p>
-          <p>Админ: admin@artroom.kz</p>
-          <p>Приём: priemka@artroom.kz</p>
-          <p>Отгрузка: otgruzka@artroom.kz</p>
-          <p className="mt-2">Пароль у всех: warehouse2026 — смените после входа.</p>
-        </div>
+        {/* Логины со страницы входа убраны намеренно: список рабочих учёток на публичной
+            странице - половина работы взломщика. Их выдаёт администратор. */}
+        <p className="mt-6 text-center text-sm text-gray-500">
+          Логин и пароль выдаёт администратор
+        </p>
       </div>
     </div>
   );

@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
+import { apiUrl } from '@/lib/session';
 import BarcodeScanner from '@/components/BarcodeScanner';
 
 import type { OrderForPicking, PickingLine } from '@/types';
@@ -39,7 +40,7 @@ export default function ShipPage() {
   const fetchOrders = async () => {
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch('/api/warehouse/ship/orders', {
+      const response = await fetch(apiUrl('/api/warehouse/ship/orders'), {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await response.json();
@@ -57,7 +58,7 @@ export default function ShipPage() {
   const startOrder = async (orderId: number) => {
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`/api/warehouse/ship/orders/${orderId}/start`, {
+      const response = await fetch(apiUrl(`/api/warehouse/ship/orders/${orderId}/start`), {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
       });

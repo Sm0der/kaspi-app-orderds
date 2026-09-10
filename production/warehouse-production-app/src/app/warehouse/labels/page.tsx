@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { apiUrl } from '@/lib/session';
 import JsBarcode from 'jsbarcode';
 
 // Печать этикеток на коробки. Смысл страницы: у изделия одно имя, а на Kaspi оно
@@ -41,7 +42,7 @@ export default function LabelsPage() {
       router.push('/login');
       return;
     }
-    fetch('/api/warehouse/labels/items', { headers: { Authorization: `Bearer ${token}` } })
+    fetch(apiUrl('/api/warehouse/labels/items'), { headers: { Authorization: `Bearer ${token}` } })
       .then((r) => r.json())
       .then((data) => {
         if (data.success) setItems(data.data);
@@ -71,7 +72,7 @@ export default function LabelsPage() {
     setError('');
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch('/api/warehouse/labels', {
+      const response = await fetch(apiUrl('/api/warehouse/labels'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ warehouseItemId: selected.id, units }),

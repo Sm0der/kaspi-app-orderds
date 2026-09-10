@@ -16,8 +16,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Почта - это логин, и вводят его на складе со сканера или планшета, где легко
+    // приезжает заглавная первая буква. Храним и ищем в нижнем регистре.
     const user = await prisma.productionUser.findUnique({
-      where: { email },
+      where: { email: String(email).trim().toLowerCase() },
     });
 
     if (!user || !user.isActive) {
@@ -47,6 +49,7 @@ export async function POST(request: NextRequest) {
         warehouseId: user.warehouseId || undefined,
         storeId: user.storeId ?? undefined,
         isActive: user.isActive,
+        mustChangePassword: user.mustChangePassword,
         createdAt: user.createdAt,
       },
       token,

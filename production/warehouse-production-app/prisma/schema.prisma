@@ -122,6 +122,7 @@ enum ProductionUserRole {
   WAREHOUSE_RECEIVER
   WAREHOUSE_SHIPPER
   MANAGER
+  PACKER
 
   @@map("production_user_role")
 }
@@ -159,8 +160,10 @@ enum WarehouseMovementType {
   @@map("warehouse_movement_type")
 }
 
-// Сотрудники цеха и склада. Отдельно от app_users дашборда: рабочий у сканера входит
-// по логину и паролю, аккаунт в Supabase Auth ему не заводят.
+// Единственная таблица людей во всей системе: и рабочий у сканера, и менеджер заказов,
+// и владелец. Дашборд заказов раньше пускал через Supabase Auth, а роли держал в app_users -
+// это означало два разных пароля и заведение аккаунтов в чужой панели. Теперь вход один
+// (см. src/lib/jwt.ts и server/middleware/requireAuth.js - оба проверяют один и тот же токен).
 model ProductionUser {
   id           String             @id @default(dbgenerated("gen_random_uuid()::text"))
   email        String             @unique @db.VarChar(255)
@@ -171,6 +174,9 @@ model ProductionUser {
   warehouseId  String?            @map("warehouse_id")
   storeId      Int?               @map("store_id")
   isActive     Boolean            @default(true) @map("is_active")
+  /// Пароль выдан администратором и известен ещё кому-то кроме владельца учётки:
+  /// вход проходит, но интерфейс ведёт на смену пароля, пока флаг не снят
+  mustChangePassword Boolean       @default(false) @map("must_change_password")
   createdAt    DateTime           @default(now()) @map("created_at")
   updatedAt    DateTime           @default(now()) @map("updated_at")
 

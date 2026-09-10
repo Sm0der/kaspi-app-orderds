@@ -1,11 +1,11 @@
 'use client';
 
 import { useState } from 'react';
-import { supabase } from '../lib/supabaseClient';
+import { LOGIN_ENDPOINT, WAREHOUSE_PATH, saveSession } from '../lib/session';
 
-// Экран входа. Аккаунт заводится вручную в панели Supabase (Authentication → Users),
-// публичной регистрации здесь нет специально: внутрь попадает только тот, кому выдали доступ.
-export default function Login() {
+// Экран входа - один на всю систему. Проверяет пароль приложение склада (раздел /sklad
+// того же домена), учётки заводит администратор там же, публичной регистрации нет.
+export default function Login({ onSignedIn }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState(null);
@@ -16,10 +16,34 @@ export default function Login() {
     setError(null);
     setBusy(true);
 
-    const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
-    if (signInError) setError('Неверная почта или пароль');
+    try {
+      const response = await fetch(LOGIN_ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
+      });
+      const body = await response.json();
 
-    setBusy(false);
+      if (!body?.success) {
+        setError(body?.error || 'Неверная почта или пароль');
+        return;
+      }
+
+      saveSession(body.data.token, body.data.user);
+
+      // Пароль, выданный администратором, меняют до начала работы - форма смены живёт
+      // на складе, отдельной такой же на дашборде заводить незачем
+      if (body.data.user.mustChangePassword) {
+        window.location.href = `${WAREHOUSE_PATH}/profile/password`;
+        return;
+      }
+
+      onSignedIn(body.data.user);
+    } catch {
+      setError('Не удалось связаться с сервером');
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (

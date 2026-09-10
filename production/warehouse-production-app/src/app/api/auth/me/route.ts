@@ -45,6 +45,7 @@ export async function GET(request: NextRequest) {
           warehouseId: user.warehouseId,
           storeId: user.storeId,
           isActive: user.isActive,
+          mustChangePassword: user.mustChangePassword,
           createdAt: user.createdAt,
         },
       } as ApiResponse<any>,
