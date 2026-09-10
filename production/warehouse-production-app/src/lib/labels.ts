@@ -9,6 +9,13 @@ export const BARCODE_STATUS_LABELS: Record<string, string> = {
 
 // Статус сборки на складе - наш собственный, он не совпадает со статусом заказа в Kaspi
 // и живёт в отдельной таблице order_picking (см. prisma/schema.prisma).
+export const PRODUCTION_ITEM_STATUS_LABELS: Record<string, string> = {
+  PENDING: 'ждёт',
+  IN_PROGRESS: 'в работе',
+  ON_HOLD: 'отложена',
+  COMPLETED: 'закрыта',
+};
+
 export const ORDER_PICKING_STATUS_LABELS: Record<string, string> = {
   NEW: 'не начат',
   PICKING: 'в сборке',

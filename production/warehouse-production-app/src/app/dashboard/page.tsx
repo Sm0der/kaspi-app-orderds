@@ -8,7 +8,7 @@ import { can, Area, roleLabel } from '@/lib/roles';
 import type { User } from '@/types';
 
 // Плитки только тех разделов, которые действительно существуют. Заготовки без страниц
-// («Остатки склада», «Мои задачи», «Цехи») отсюда убраны: плитка, ведущая на 404, хуже,
+// («Остатки склада», «Цехи», «Товары склада») отсюда убраны: плитка, ведущая на 404, хуже,
 // чем её отсутствие - человек решает, что сломалось приложение.
 const TILES: { title: string; description: string; href: string; area: Area; external?: boolean }[] = [
   {
@@ -37,6 +37,18 @@ const TILES: { title: string; description: string; href: string; area: Area; ext
     description: 'Сборка заказа по сканеру и отгрузка',
     href: '/warehouse/ship',
     area: 'ship',
+  },
+  {
+    title: 'Мой цех',
+    description: 'Задачи, стоящие в вашем цехе, и отметка выработки',
+    href: '/production/tasks',
+    area: 'production',
+  },
+  {
+    title: 'Производство',
+    description: 'Доска по цехам и запуск изделий в работу',
+    href: '/production/board',
+    area: 'productionStats',
   },
   {
     title: 'Учётные записи',
