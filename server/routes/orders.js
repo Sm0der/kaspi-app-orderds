@@ -44,7 +44,9 @@ router.get('/products/suggest', async (req, res, next) => {
 // spacesPerUnit < 1 - мелкий товар, несколько штук в 1 месте (например 0.1 = 10 шт в 1 месте).
 // spacesPerUnit >= 1 - крупный/громоздкий товар, 1 шт занимает несколько мест (например 4 = 4 места на 1 шт).
 // Если storeId не указан - правило применяется ко всем товарам с этим SKU во всех магазинах.
-router.put('/products/packing', requireAdmin, async (req, res, next) => {
+// Доступно и менеджеру: правило упаковки нужно ему для формирования накладных
+// (от него зависит число мест). Под админом остаются только настройки картинок.
+router.put('/products/packing', async (req, res, next) => {
   try {
     const { sku, spacesPerUnit, storeId } = req.body;
 
