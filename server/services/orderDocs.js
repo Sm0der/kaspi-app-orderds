@@ -27,10 +27,12 @@ async function loadOrdersWithSpaces(orderCodes) {
   const placeholders = orderCodes.map((_, i) => `$${i + 1}`).join(',');
   const found = await db.query(
     `SELECT o.id, o.store_id, o.kaspi_order_id, o.order_code, o.status, o.stage,
-            o.urgency, o.delivery_date, s.name as store_name,
+            o.urgency, o.delivery_date, o.ship_date, s.name as store_name,
             (o.raw_data->'attributes'->'deliveryAddress'->>'town') AS town,
             (o.raw_data->'attributes'->'kaspiDelivery'->>'waybillNumber') AS waybill_number,
             (o.raw_data->'attributes'->>'assembled')::boolean AS assembled,
+            -- Предзаказ: у него формирование накладной требует отдельного шага ARRIVED
+            (o.raw_data->'attributes'->>'preOrder')::boolean AS pre_order,
             COALESCE(
               json_agg(
                 json_build_object(

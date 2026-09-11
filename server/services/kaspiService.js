@@ -146,6 +146,14 @@ class KaspiService {
     return this.changeOrderStatus(orderId, { status: 'ACCEPTED_BY_MERCHANT' });
   }
 
+  // Отметить, что товар по ПРЕДЗАКАЗУ поступил на склад (ARRIVED).
+  // Только для заказов с preOrder=true в статусе ACCEPTED_BY_MERCHANT: без этого шага
+  // Kaspi отклоняет ASSEMBLE предзаказа с "The current order status does not allow this action".
+  // ВАЖНО: это заявление Kaspi, что товар физически есть, - вызывать только по факту наличия.
+  async markArrived(orderId) {
+    return this.changeOrderStatus(orderId, { status: 'ARRIVED' });
+  }
+
   // Сформировать накладную (перевести заказ в статус ASSEMBLE).
   // Доступно только для заказов в статусе ACCEPTED_BY_MERCHANT.
   // numberOfSpace - количество накладных/мест (упаковок) для заказа.

@@ -144,6 +144,88 @@ router.get('/by-sku', async (req, res, next) => {
   }
 });
 
+// POST /api/orders/allocate-preview - Раскладка заказов под доступное количество товара.
+// Вход: { sku, storeId?, quantity }. Продавец вручную указывает, сколько штук готово.
+// Логика: берём все несобранные заказы с этим артикулом, сортируем по приоритету
+// (срочность -> дата отгрузки -> дата доставки), идём сверху и набираем заказы, пока
+// суммарное количество штук не упрётся в quantity. Заказам одной даты не хватило -
+// добираем со следующих дат (в выборку попадает то, что помещается по приоритету).
+// Дату в Kaspi НЕ меняем - это только отбор.
+// Ничего не мутирует, только показывает план.
+router.post('/allocate-preview', async (req, res, next) => {
+  try {
+    const sku = String(req.body.sku || '').trim();
+    const quantity = Number(req.body.quantity);
+    const storeId = req.body.storeId;
+
+    if (!sku) return res.status(400).json({ error: 'Нужен артикул (sku)' });
+    if (!Number.isInteger(quantity) || quantity < 1) {
+      return res.status(400).json({ error: 'Количество должно быть целым числом от 1' });
+    }
+
+    const params = [sku];
+    let where = "oi.sku = $1 AND o.stage IN ('new', 'accepted', 'packed')";
+    if (storeId) {
+      params.push(storeId);
+      where += ` AND o.store_id = $${params.length}`;
+    }
+
+    const result = await db.query(`
+      SELECT o.order_code, o.stage, o.urgency, o.delivery_date, o.ship_date, o.store_id,
+        s.name AS store_name,
+        SUM(oi.quantity)::int AS units,
+        (o.raw_data->'attributes'->>'preOrder')::boolean AS pre_order,
+        (o.stage = 'packed') AS assembled
+      FROM orders o
+      JOIN order_items oi ON oi.order_id = o.id
+      LEFT JOIN stores s ON s.id = o.store_id
+      WHERE ${where}
+      GROUP BY o.id, s.id
+    `, params);
+
+    const urgencyRank = { overdue: 0, today: 1, soon: 2, upcoming: 3 };
+    const candidates = result.rows.sort((a, b) => {
+      const ra = urgencyRank[a.urgency] ?? 4;
+      const rb = urgencyRank[b.urgency] ?? 4;
+      if (ra !== rb) return ra - rb;
+      const sa = a.ship_date ? new Date(a.ship_date) : new Date(8640000000000000);
+      const sb = b.ship_date ? new Date(b.ship_date) : new Date(8640000000000000);
+      if (+sa !== +sb) return sa - sb;
+      return new Date(a.delivery_date || 0) - new Date(b.delivery_date || 0);
+    });
+
+    // Набираем под наличие. Уже собранные (packed) наличие не тратят - их накладная
+    // просто переиспользуется при формировании, товар под них уже был отложен раньше.
+    let remaining = quantity;
+    const selected = [];
+    const overflow = [];
+    for (const order of candidates) {
+      if (order.assembled) { selected.push({ ...order, reused: true }); continue; }
+      if (order.units <= remaining) {
+        remaining -= order.units;
+        selected.push({ ...order, reused: false });
+      } else {
+        overflow.push(order);
+      }
+    }
+
+    const selectedNew = selected.filter(o => !o.reused);
+    res.json({
+      sku,
+      quantity,
+      allocatedUnits: quantity - remaining,
+      remainingUnits: remaining,
+      selectedCount: selected.length,
+      overflowCount: overflow.length,
+      preorderCount: selectedNew.filter(o => o.pre_order).length,
+      selected,
+      overflow
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // GET /api/orders/manifest?orderCodes=123,456 - Сводный PDF-манифест по списку заказов:
 // один файл со всеми заказами (по приоритету срочности), а не набор отдельных документов.
 // Это НЕ официальная накладная Kaspi со штрихкодом для курьера (её API не отдаёт, только
@@ -488,6 +570,12 @@ router.post('/assemble-batch', async (req, res, next) => {
       return res.status(400).json({ error: 'orderCodes должен быть непустым массивом' });
     }
 
+    // Предзаказам Kaspi не даёт формировать накладную, пока товар не отмечен поступившим
+    // (ARRIVED). Это заявление о физическом наличии товара, поэтому автоматически его НЕ шлём:
+    // только если вызывающий явно передал allowPreorderArrived (в интерфейсе - отдельное
+    // подтверждение «товар есть»). Обычное формирование без флага предзаказы пропускает с ошибкой.
+    const allowPreorderArrived = req.body.allowPreorderArrived === true;
+
     const sortedOrders = await loadOrdersWithSpaces(orderCodes);
     const foundCodes = new Set(sortedOrders.map(o => o.order_code));
     const results = [];
@@ -538,11 +626,32 @@ router.post('/assemble-batch', async (req, res, next) => {
         if (order.stage === 'new') {
           await storeConfig.service.acceptOrder(order.kaspi_order_id);
         }
+
+        // Предзаказ: Kaspi отклонит ASSEMBLE, пока товар не отмечен поступившим (ARRIVED).
+        // Шлём ARRIVED только при явном подтверждении наличия - иначе честно отказываем,
+        // чтобы случайно не заявить Kaspi о поступлении того, чего нет (грозит штрафом).
+        let arrived = false;
+        if (order.pre_order) {
+          if (!allowPreorderArrived) {
+            results.push({
+              order_code: order.order_code,
+              success: false,
+              preOrder: true,
+              error: 'Предзаказ: требуется подтверждение поступления товара (ARRIVED)'
+            });
+            continue;
+          }
+          await storeConfig.service.markArrived(order.kaspi_order_id);
+          arrived = true;
+        }
+
         await storeConfig.service.assembleOrder(order.kaspi_order_id, order.numberOfSpace);
         results.push({
           order_code: order.order_code,
           success: true,
           reused: false,
+          arrived,
+          preOrder: order.pre_order || false,
           urgency: order.urgency,
           positionsCount: order.positionsCount,
           numberOfSpace: order.numberOfSpace

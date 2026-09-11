@@ -7,6 +7,7 @@ import {
   shipmentLabel, isShippingToday, formatMoney, totalQuantity
 } from '../lib/labels';
 import Thumb from './Thumb';
+import AllocatePanel from './AllocatePanel';
 
 const TONE_COLOR = {
   red: 'var(--red)',
@@ -396,6 +397,8 @@ export default function ShippingView({ orders, summary, loading, filters, setFil
           </div>
         </section>
       </div>
+
+      <AllocatePanel storeId={storeId} onDone={onRefetch} />
 
       {isAdmin && <ProductImagesPanel />}
 
