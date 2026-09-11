@@ -145,6 +145,15 @@ CREATE INDEX IF NOT EXISTS idx_orders_order_date ON orders(order_date);
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS ship_date DATE;
 CREATE INDEX IF NOT EXISTS idx_orders_ship_date ON orders(ship_date);
 
+-- Момент формирования накладной - Kaspi хранит его только внутри PDF (/CreationDate),
+-- читает services/waybillStamps.js. Именно timestamptz: значение пишется из Node, а в
+-- колонке без пояса node-pg толкует время по поясу процесса (локально Алматы, на Vercel
+-- UTC), и один штамп показывался то в 16:52, то в 21:52. Синхронизация эти колонки не
+-- трогает - её UPSERT перечисляет столбцы поимённо.
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS waybill_made_at TIMESTAMPTZ;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS waybill_stamped_number VARCHAR(50);
+CREATE INDEX IF NOT EXISTS idx_orders_waybill_made_at ON orders(waybill_made_at);
+
 -- Миграция: хеш присланного Kaspi JSON заказа. У Kaspi нет фильтра "изменённые с ...",
 -- он всегда отдаёт все заказы за 14 дней, поэтому изменившиеся мы вычисляем сами -
 -- сравнением хеша. Без этого каждая синхронизация переписывала все ~1300 заказов,
