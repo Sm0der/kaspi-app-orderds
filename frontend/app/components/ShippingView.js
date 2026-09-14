@@ -75,6 +75,9 @@ export default function ShippingView({ orders, summary, loading, filters, setFil
         storeId: storeId || undefined
       });
       setPackingSaved({ sku: value, spacesPerUnit: amount, name: data.updated?.[0]?.name });
+      // Предпросмотр уже посчитан по старому правилу - пересчитываем, иначе накладная
+      // уйдёт с числом мест, которого продавец на экране не видел.
+      if (preview) await runPreview();
     } catch (err) {
       setError(errorText(err, 'Не удалось сохранить правило упаковки'));
     } finally {

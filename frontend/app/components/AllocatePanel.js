@@ -18,51 +18,40 @@ export default function AllocatePanel({ storeId, onDone }) {
   const [results, setResults] = useState(null);
   const [showOverflow, setShowOverflow] = useState(false);
 
-  // Правило упаковки (мест на 1 штуку) для этого же артикула - раньше в этой панели
-  // его нельзя было ни увидеть, ни поменять, хотя от него зависит число мест в накладной.
+  // Правило упаковки (мест на 1 штуку) для этого же артикула. Применяется прямо при
+  // раскладке: отдельную кнопку «сохранить» легко не заметить, и накладная уходила с
+  // прежним числом мест (проверено вживую - вписали 3, накладная вышла на 1 место).
   const [packingValue, setPackingValue] = useState('');
-  const [packingBusy, setPackingBusy] = useState(false);
-  const [packingSaved, setPackingSaved] = useState(null);
-
-  const savePackingRule = async () => {
-    const value = sku.trim();
-    const amount = Number(packingValue);
-    if (!value) return setError('Впишите артикул для правила упаковки');
-    if (!(amount > 0)) return setError('Мест на 1 штуку — число больше 0');
-
-    setPackingBusy(true);
-    setError(null);
-    setPackingSaved(null);
-    try {
-      const { data } = await api.put('/api/orders/products/packing', {
-        sku: value,
-        spacesPerUnit: amount,
-        storeId: storeId || undefined
-      });
-      setPackingSaved({ sku: value, spacesPerUnit: amount, name: data.updated?.[0]?.name });
-    } catch (err) {
-      setError(errorText(err, 'Не удалось сохранить правило упаковки'));
-    } finally {
-      setPackingBusy(false);
-    }
-  };
 
   const allocate = async () => {
     const qty = Number(quantity);
-    if (!sku.trim()) return setError('Впишите артикул');
+    const value = sku.trim();
+    const perUnit = packingValue === '' ? null : Number(packingValue);
+    if (!value) return setError('Впишите артикул');
     if (!Number.isInteger(qty) || qty < 1) return setError('Впишите количество — целое число от 1');
+    if (perUnit !== null && !(perUnit > 0)) return setError('Мест на 1 штуку — число больше 0');
 
     setBusy(true);
     setError(null);
     setResults(null);
     setPlan(null);
     try {
+      if (perUnit !== null) {
+        await api.put('/api/orders/products/packing', {
+          sku: value,
+          spacesPerUnit: perUnit,
+          storeId: storeId || undefined
+        });
+      }
+
       const { data } = await api.post('/api/orders/allocate-preview', {
-        sku: sku.trim(),
+        sku: value,
         quantity: qty,
         storeId: storeId || undefined
       });
       setPlan(data);
+      // Показываем то правило, по которому реально посчитаны места ниже
+      if (data.spacesPerUnit != null) setPackingValue(String(data.spacesPerUnit));
       if (data.selectedCount === 0) setError('Под это количество не набралось ни одного заказа');
     } catch (err) {
       setError(errorText(err, 'Не удалось разложить'));
@@ -126,12 +115,6 @@ export default function AllocatePanel({ storeId, onDone }) {
               placeholder="10"
             />
           </label>
-          <button className="btn" onClick={allocate} disabled={busy}>
-            {busy && <span className="spinner" />} Разложить
-          </button>
-        </div>
-
-        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end', marginTop: 14 }}>
           <label className="field" style={{ width: 140 }}>
             <span className="eyebrow">Мест на 1 шт</span>
             <input
@@ -142,18 +125,13 @@ export default function AllocatePanel({ storeId, onDone }) {
               value={packingValue}
               onChange={(e) => setPackingValue(e.target.value)}
               placeholder="1"
+              title="Правило упаковки этого товара. Применяется сразу при раскладке — число мест видно в таблице ниже."
             />
           </label>
-          <button className="btn btn-quiet btn-sm" onClick={savePackingRule} disabled={packingBusy || !sku.trim() || !packingValue}>
-            {packingBusy && <span className="spinner" />} Сохранить правило упаковки
+          <button className="btn" onClick={allocate} disabled={busy}>
+            {busy && <span className="spinner" />} Разложить
           </button>
         </div>
-        {packingSaved && (
-          <div className="alert alert-ok" style={{ marginTop: 10 }}>
-            Правило для «{packingSaved.sku}»{packingSaved.name ? ` (${packingSaved.name})` : ''} сохранено:
-            {' '}{packingSaved.spacesPerUnit} мест на 1 шт.
-          </div>
-        )}
 
         {error && <div className="alert alert-error" style={{ marginTop: 14 }}>{error}</div>}
 
@@ -165,6 +143,12 @@ export default function AllocatePanel({ storeId, onDone }) {
               {plan.selectedCount - newCount > 0 && <>, уже собрано — {plan.selectedCount - newCount}</>})
               {plan.overflowCount > 0 && <>. Не хватило наличия на ещё {plan.overflowCount}</>}
               {plan.remainingUnits > 0 && <>. Остаток наличия: {plan.remainingUnits} шт</>}
+              {plan.spacesTotal > 0 && (
+                <>
+                  {' '}· Мест в накладных: <strong>{plan.spacesTotal}</strong>
+                  {plan.spacesPerUnit != null && <> (правило: {plan.spacesPerUnit} мест на 1 шт)</>}
+                </>
+              )}
             </div>
 
             {plan.preorderCount > 0 && (
@@ -183,6 +167,7 @@ export default function AllocatePanel({ storeId, onDone }) {
                     <th>Магазин</th>
                     <th>Отгрузка</th>
                     <th style={{ textAlign: 'right' }}>Шт</th>
+                    <th style={{ textAlign: 'right' }}>Мест</th>
                     <th>Статус</th>
                   </tr>
                 </thead>
@@ -195,6 +180,7 @@ export default function AllocatePanel({ storeId, onDone }) {
                         {o.ship_date ? new Date(o.ship_date).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' }) : '—'}
                       </td>
                       <td className="num" style={{ textAlign: 'right' }}>{o.units}</td>
+                      <td className="num" style={{ textAlign: 'right', fontWeight: 600 }}>{o.numberOfSpace ?? '—'}</td>
                       <td>
                         {o.reused ? (
                           <span className="badge" style={{ borderColor: 'var(--steel)', color: 'var(--steel)' }}>уже собран</span>

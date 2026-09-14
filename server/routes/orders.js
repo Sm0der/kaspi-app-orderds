@@ -211,6 +211,18 @@ router.post('/allocate-preview', async (req, res, next) => {
       }
     }
 
+    // Сколько мест выйдет по накладной у каждого отобранного заказа - по тому же правилу
+    // упаковки, по которому потом посчитает и формирование. Без этого число мест продавец
+    // видел только постфактум, в результатах, когда накладная уже выпущена.
+    const withSpaces = await loadOrdersWithSpaces(selected.map(o => o.order_code));
+    const spacesByCode = new Map(withSpaces.map(o => [o.order_code, o.numberOfSpace]));
+    for (const order of selected) order.numberOfSpace = spacesByCode.get(order.order_code) ?? null;
+
+    const ruleRow = await db.query(
+      `SELECT spaces_per_unit FROM products WHERE sku = $1${storeId ? ' AND store_id = $2' : ''} LIMIT 1`,
+      storeId ? [sku, storeId] : [sku]
+    );
+
     const selectedNew = selected.filter(o => !o.reused);
     res.json({
       sku,
@@ -220,6 +232,8 @@ router.post('/allocate-preview', async (req, res, next) => {
       selectedCount: selected.length,
       overflowCount: overflow.length,
       preorderCount: selectedNew.filter(o => o.pre_order).length,
+      spacesPerUnit: ruleRow.rows[0] ? Number(ruleRow.rows[0].spaces_per_unit) : null,
+      spacesTotal: selected.reduce((sum, o) => sum + (o.numberOfSpace || 0), 0),
       selected,
       overflow
     });
@@ -644,8 +658,18 @@ router.post('/assemble-batch', async (req, res, next) => {
             });
             continue;
           }
-          await storeConfig.service.markArrived(order.kaspi_order_id);
-          arrived = true;
+          try {
+            await storeConfig.service.markArrived(order.kaspi_order_id);
+            arrived = true;
+          } catch (arrivedError) {
+            // Kaspi отвечает 404 "Order not found" на ARRIVED, если поступление по этому
+            // предзаказу уже отмечено раньше (в кабинете или прошлой попыткой) - сам заказ
+            // при этом жив и читается через GET. Проверено на живых заказах: пять одинаковых
+            // предзаказов, у трёх ARRIVED падал с 404, у двух проходил. Поэтому ошибку здесь
+            // не считаем фатальной: пробуем ASSEMBLE - если товар и правда не отмечен
+            // поступившим, Kaspi откажет уже на нём, со своим понятным статусным текстом.
+            if (arrivedError.response?.status !== 404) throw arrivedError;
+          }
         }
 
         await storeConfig.service.assembleOrder(order.kaspi_order_id, order.numberOfSpace);
@@ -661,7 +685,12 @@ router.post('/assemble-batch', async (req, res, next) => {
         });
       } catch (error) {
         const kaspiError = error.response?.data?.errors?.[0]?.title;
-        results.push({ order_code: order.order_code, success: false, error: kaspiError || error.message });
+        // "Order not found" от Kaspi на смене статуса читается как «нет такого заказа»,
+        // хотя заказ есть - переводим в то, что с ним делать дальше.
+        const readable = kaspiError === 'Order not found'
+          ? 'Kaspi не принимает смену статуса по этому заказу — сформируйте его в кабинете Kaspi'
+          : kaspiError;
+        results.push({ order_code: order.order_code, success: false, error: readable || error.message });
       }
     }
 
