@@ -18,19 +18,23 @@
   color-scheme: light dark;
 
   /* Слои поверхностей: 900 - фон страницы, 600 - самый близкий к глазу */
-  --ink-900: light-dark(#F2EDE3, #0B0A08);
-  --ink-850: light-dark(#EDE7DB, #100E0C);
-  --ink-800: light-dark(#FBF8F2, #15120F);
-  --ink-700: light-dark(#E9E2D4, #1C1815);
-  --ink-600: light-dark(#DFD6C4, #241F1A);
+  /* Плечо 12.09.2026: тёмная тема сливалась - панели, границы и линии почти не
+     отличались от фона (весь диапазон умещался в 0x08..0x24). Раздвинули шаг между
+     слоями и подняли контраст границ/бледного текста.
+     Значения обязаны совпадать с frontend/app/globals.css - это один язык на два деплоя. */
+  --ink-900: light-dark(#F2EDE3, #09080A);
+  --ink-850: light-dark(#EDE7DB, #131013);
+  --ink-800: light-dark(#FBF8F2, #1D1918);
+  --ink-700: light-dark(#E9E2D4, #292321);
+  --ink-600: light-dark(#DFD6C4, #37302B);
 
-  --line: light-dark(#D9CFBB, #2A241E);
-  --line-soft: light-dark(#E7E0D1, #201B17);
-  --line-strong: light-dark(#C2B49A, #3B332B);
+  --line: light-dark(#D9CFBB, #3D342C);
+  --line-soft: light-dark(#E7E0D1, #2C2622);
+  --line-strong: light-dark(#C2B49A, #554A3E);
 
-  --text: light-dark(#241E16, #F1EBE1);
-  --text-dim: light-dark(#6B6153, #A79C8D);
-  --text-faint: light-dark(#948A79, #6E655A);
+  --text: light-dark(#241E16, #F5F0E7);
+  --text-dim: light-dark(#6B6153, #B9AF9F);
+  --text-faint: light-dark(#948A79, #8A8072);
 
   --brass: light-dark(#B98B36, #D6A756);
   --brass-bright: light-dark(#D6A756, #EFC57E);
