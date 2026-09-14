@@ -18,6 +18,35 @@ export default function AllocatePanel({ storeId, onDone }) {
   const [results, setResults] = useState(null);
   const [showOverflow, setShowOverflow] = useState(false);
 
+  // Правило упаковки (мест на 1 штуку) для этого же артикула - раньше в этой панели
+  // его нельзя было ни увидеть, ни поменять, хотя от него зависит число мест в накладной.
+  const [packingValue, setPackingValue] = useState('');
+  const [packingBusy, setPackingBusy] = useState(false);
+  const [packingSaved, setPackingSaved] = useState(null);
+
+  const savePackingRule = async () => {
+    const value = sku.trim();
+    const amount = Number(packingValue);
+    if (!value) return setError('Впишите артикул для правила упаковки');
+    if (!(amount > 0)) return setError('Мест на 1 штуку — число больше 0');
+
+    setPackingBusy(true);
+    setError(null);
+    setPackingSaved(null);
+    try {
+      const { data } = await api.put('/api/orders/products/packing', {
+        sku: value,
+        spacesPerUnit: amount,
+        storeId: storeId || undefined
+      });
+      setPackingSaved({ sku: value, spacesPerUnit: amount, name: data.updated?.[0]?.name });
+    } catch (err) {
+      setError(errorText(err, 'Не удалось сохранить правило упаковки'));
+    } finally {
+      setPackingBusy(false);
+    }
+  };
+
   const allocate = async () => {
     const qty = Number(quantity);
     if (!sku.trim()) return setError('Впишите артикул');
@@ -101,6 +130,30 @@ export default function AllocatePanel({ storeId, onDone }) {
             {busy && <span className="spinner" />} Разложить
           </button>
         </div>
+
+        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end', marginTop: 14 }}>
+          <label className="field" style={{ width: 140 }}>
+            <span className="eyebrow">Мест на 1 шт</span>
+            <input
+              className="input"
+              type="number"
+              min="0.01"
+              step="0.01"
+              value={packingValue}
+              onChange={(e) => setPackingValue(e.target.value)}
+              placeholder="1"
+            />
+          </label>
+          <button className="btn btn-quiet btn-sm" onClick={savePackingRule} disabled={packingBusy || !sku.trim() || !packingValue}>
+            {packingBusy && <span className="spinner" />} Сохранить правило упаковки
+          </button>
+        </div>
+        {packingSaved && (
+          <div className="alert alert-ok" style={{ marginTop: 10 }}>
+            Правило для «{packingSaved.sku}»{packingSaved.name ? ` (${packingSaved.name})` : ''} сохранено:
+            {' '}{packingSaved.spacesPerUnit} мест на 1 шт.
+          </div>
+        )}
 
         {error && <div className="alert alert-error" style={{ marginTop: 14 }}>{error}</div>}
 

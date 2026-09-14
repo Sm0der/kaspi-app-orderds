@@ -291,6 +291,7 @@ router.get('/assemble-preview', async (req, res, next) => {
         delivery_date: o.delivery_date,
         positionsCount: o.positionsCount,
         numberOfSpace: o.numberOfSpace,
+        pre_order: o.pre_order || false,
         // Заказ уже собран в одном из прошлых вывозов - при формировании его накладную
         // просто переиспользуют, к Kaspi повторно не обращаются (см. /assemble-batch)
         assembled: o.stage === 'packed',

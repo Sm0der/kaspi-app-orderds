@@ -48,16 +48,46 @@ export default function ShippingView({ orders, summary, loading, filters, setFil
 
   // — поиск заказов по артикулу —
   const [sku, setSku] = useState('');
-  const [packingMode, setPackingMode] = useState('unitsPerSpace');
-  const [packingValue, setPackingValue] = useState(1);
   const [skuBusy, setSkuBusy] = useState(false);
   const [skuFound, setSkuFound] = useState(null);
+
+  // — правило упаковки (мест на 1 штуку) — общее для обеих панелей формирования ниже,
+  // чтобы его можно было задать/поменять независимо от того, как нашли заказы: по
+  // артикулу, по наименованию (вручную скопировав номера) или руками.
+  const [packingSku, setPackingSku] = useState('');
+  const [packingValue, setPackingValue] = useState('');
+  const [packingBusy, setPackingBusy] = useState(false);
+  const [packingSaved, setPackingSaved] = useState(null);
+
+  const savePackingRule = async () => {
+    const value = packingSku.trim();
+    const amount = Number(packingValue);
+    if (!value) return setError('Впишите артикул для правила упаковки');
+    if (!(amount > 0)) return setError('Мест на 1 штуку — число больше 0');
+
+    setPackingBusy(true);
+    setError(null);
+    setPackingSaved(null);
+    try {
+      const { data } = await api.put('/api/orders/products/packing', {
+        sku: value,
+        spacesPerUnit: amount,
+        storeId: storeId || undefined
+      });
+      setPackingSaved({ sku: value, spacesPerUnit: amount, name: data.updated?.[0]?.name });
+    } catch (err) {
+      setError(errorText(err, 'Не удалось сохранить правило упаковки'));
+    } finally {
+      setPackingBusy(false);
+    }
+  };
 
   // — пакетное формирование накладных —
   const [codesInput, setCodesInput] = useState('');
   const [preview, setPreview] = useState(null);
   const [previewBusy, setPreviewBusy] = useState(false);
   const [assembling, setAssembling] = useState(false);
+  const [confirmArrived, setConfirmArrived] = useState(false);
   const [results, setResults] = useState(null);
 
   const orderCodes = () => codesInput.split(/[\s,;]+/).map((s) => s.trim()).filter(Boolean);
@@ -73,22 +103,6 @@ export default function ShippingView({ orders, summary, loading, filters, setFil
     setResults(null);
 
     try {
-      // Правило упаковки приводим к единому виду «мест на 1 штуку»: для мелкого товара
-      // это 1/значение (10 шт в месте → 0.1), для крупного — само значение (4 места на шт).
-      const amount = Number(packingValue);
-      if (amount > 0) {
-        const spacesPerUnit = packingMode === 'unitsPerSpace' ? 1 / amount : amount;
-        try {
-          await api.put('/api/orders/products/packing', {
-            sku: value,
-            spacesPerUnit,
-            storeId: storeId || undefined
-          });
-        } catch {
-          // товара может не быть в каталоге — на поиск заказов это не влияет
-        }
-      }
-
       const { data } = await api.get('/api/orders/by-sku', {
         params: { sku: value, storeId: storeId || undefined }
       });
@@ -100,6 +114,7 @@ export default function ShippingView({ orders, summary, loading, filters, setFil
         setError(`Неотправленных заказов с артикулом «${value}» не найдено`);
       } else {
         setCodesInput(codes.join('\n'));
+        setPackingSku(value);
       }
     } catch (err) {
       setError(errorText(err, 'Не удалось найти заказы по артикулу'));
@@ -115,6 +130,7 @@ export default function ShippingView({ orders, summary, loading, filters, setFil
     setPreviewBusy(true);
     setError(null);
     setResults(null);
+    setConfirmArrived(false);
     try {
       const { data } = await api.get('/api/orders/assemble-preview', {
         params: { orderCodes: codes.join(',') }
@@ -127,6 +143,8 @@ export default function ShippingView({ orders, summary, loading, filters, setFil
     }
   };
 
+  const previewPreorderCount = preview ? preview.orders.filter((o) => o.pre_order && !o.assembled).length : 0;
+
   const runAssemble = async () => {
     const codes = orderCodes();
     if (codes.length === 0) return;
@@ -134,9 +152,15 @@ export default function ShippingView({ orders, summary, loading, filters, setFil
     setAssembling(true);
     setError(null);
     try {
-      const { data } = await api.post('/api/orders/assemble-batch', { orderCodes: codes });
+      // allowPreorderArrived - явное подтверждение «товар есть», без него предзаказы
+      // сервер честно пропустит с ошибкой (см. server/routes/orders.js assemble-batch).
+      const { data } = await api.post('/api/orders/assemble-batch', {
+        orderCodes: codes,
+        allowPreorderArrived: confirmArrived
+      });
       setResults(data);
       setPreview(null);
+      setConfirmArrived(false);
       setTimeout(onRefetch, 1500);
     } catch (err) {
       setError(errorText(err, 'Не удалось сформировать накладные'));
@@ -319,30 +343,13 @@ export default function ShippingView({ orders, summary, loading, filters, setFil
           </div>
           <div className="panel-body">
             <p className="panel-note" style={{ marginBottom: 16 }}>
-              Укажите артикул и правило упаковки. Система найдёт все неотправленные заказы с этим
-              товаром, отсортирует по срочности и подставит номера в соседнюю панель.
+              Укажите артикул — система найдёт все неотправленные заказы с этим товаром,
+              отсортирует по срочности и подставит номера в соседнюю панель.
             </p>
             <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
               <div className="field" style={{ flex: '1 1 150px' }}>
                 <label>Артикул</label>
                 <input className="input mono" value={sku} onChange={(e) => setSku(e.target.value)} placeholder="108268540" />
-              </div>
-              <div className="field" style={{ flex: '1 1 190px' }}>
-                <label>Правило упаковки</label>
-                <select className="select" value={packingMode} onChange={(e) => setPackingMode(e.target.value)}>
-                  <option value="unitsPerSpace">Штук в одном месте</option>
-                  <option value="spacesPerUnit">Мест на одну штуку</option>
-                </select>
-              </div>
-              <div className="field" style={{ width: 88 }}>
-                <label>Сколько</label>
-                <input
-                  type="number"
-                  min="1"
-                  className="input mono"
-                  value={packingValue}
-                  onChange={(e) => setPackingValue(Math.max(1, parseInt(e.target.value, 10) || 1))}
-                />
               </div>
               <button className="btn btn-primary" onClick={findBySku} disabled={skuBusy || !sku.trim()}>
                 {skuBusy && <span className="spinner" />} Найти
@@ -355,6 +362,50 @@ export default function ShippingView({ orders, summary, loading, filters, setFil
                   <> Из них {skuFound.alreadyAssembled} уже собраны в прошлом вывозе и ждут отправки —
                   повторно к Kaspi обращаться не будем, просто переиспользуем накладную.</>
                 )}
+              </div>
+            )}
+
+            <div className="divider" style={{ width: '100%', height: 1, background: 'var(--line)', margin: '18px 0' }} />
+
+            <p className="panel-note" style={{ marginBottom: 12 }}>
+              Правило упаковки — сколько мест накладной занимает 1 штука товара. Работает
+              независимо от поиска выше: пригодится и когда заказы нашли по наименованию,
+              и при формировании по наличию.
+            </p>
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+              <div className="field" style={{ flex: '1 1 150px' }}>
+                <label>Артикул</label>
+                <input
+                  className="input mono"
+                  value={packingSku}
+                  onChange={(e) => setPackingSku(e.target.value)}
+                  placeholder="108268540"
+                />
+              </div>
+              <div className="field" style={{ width: 140 }}>
+                <label>Мест на 1 шт</label>
+                <input
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                  className="input mono"
+                  value={packingValue}
+                  onChange={(e) => setPackingValue(e.target.value)}
+                  placeholder="1"
+                />
+              </div>
+              <button className="btn" onClick={savePackingRule} disabled={packingBusy || !packingSku.trim() || !packingValue}>
+                {packingBusy && <span className="spinner" />} Сохранить правило
+              </button>
+            </div>
+            <p className="panel-note" style={{ marginTop: 8, fontSize: 12 }}>
+              Меньше 1 — несколько штук в одном месте (например 0.1 = 10 шт на место). Больше или
+              равно 1 — одна штука занимает несколько мест (например 4 = 4 места на штуку).
+            </p>
+            {packingSaved && (
+              <div className="alert alert-ok" style={{ marginTop: 12 }}>
+                Правило для «{packingSaved.sku}»{packingSaved.name ? ` (${packingSaved.name})` : ''} сохранено:
+                {' '}{packingSaved.spacesPerUnit} мест на 1 шт.
               </div>
             )}
           </div>
@@ -372,7 +423,7 @@ export default function ShippingView({ orders, summary, loading, filters, setFil
             <textarea
               className="textarea mono"
               value={codesInput}
-              onChange={(e) => { setCodesInput(e.target.value); setPreview(null); setResults(null); }}
+              onChange={(e) => { setCodesInput(e.target.value); setPreview(null); setResults(null); setConfirmArrived(false); }}
               placeholder={'1035993906\n1040537571, 1032519407'}
               rows={3}
             />
@@ -381,11 +432,27 @@ export default function ShippingView({ orders, summary, loading, filters, setFil
                 {previewBusy && <span className="spinner" />} Предпросмотр
               </button>
               {preview && (
-                <button className="btn btn-primary" onClick={runAssemble} disabled={assembling || preview.orders.length === 0}>
-                  {assembling && <span className="spinner" />} Сформировать ({preview.orders.length})
+                <button
+                  className="btn btn-primary"
+                  onClick={runAssemble}
+                  disabled={assembling || preview.orders.length === 0 || (previewPreorderCount > 0 && !confirmArrived)}
+                >
+                  {assembling && <span className="spinner" />}
+                  {previewPreorderCount > 0 ? `Отметить поступление и сформировать (${preview.orders.length})` : `Сформировать (${preview.orders.length})`}
                 </button>
               )}
             </div>
+
+            {preview && previewPreorderCount > 0 && (
+              <label className="alert" style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginTop: 12, borderColor: 'var(--amber)', color: 'var(--text)', cursor: 'pointer' }}>
+                <input type="checkbox" checked={confirmArrived} onChange={(e) => setConfirmArrived(e.target.checked)} style={{ marginTop: 3 }} />
+                <span>
+                  Среди этих заказов {previewPreorderCount} предзаказ(ов). Формирование отправит
+                  Kaspi «товар поступил» (ARRIVED) — подтверждайте, только если товар
+                  действительно на складе, иначе будет начислена просрочка.
+                </span>
+              </label>
+            )}
 
             {preview && <AssemblePreview preview={preview} />}
             {results && <AssembleResults results={results} />}
@@ -635,6 +702,15 @@ function AssemblePreview({ preview }) {
                         уже собран
                       </span>
                     )}
+                    {!order.assembled && order.pre_order && (
+                      <span
+                        className="badge"
+                        style={{ marginLeft: 8, background: 'var(--ink-700)', borderColor: 'var(--amber)', color: 'var(--amber)' }}
+                        title="Kaspi отклонит формирование, пока товар не отмечен поступившим"
+                      >
+                        предзаказ → ARRIVED
+                      </span>
+                    )}
                   </td>
                   <td style={{ color: urgency?.color }}>{urgency?.label || '—'}</td>
                   <td className="num" style={{ textAlign: 'right' }}>{order.positionsCount}</td>
@@ -712,7 +788,9 @@ function AssembleResults({ results }) {
             {row.success
               ? row.reused
                 ? ` — уже был собран, накладная переиспользована (${row.numberOfSpace} мест)`
-                : ` — собран сейчас, ${row.numberOfSpace} мест`
+                : row.arrived
+                  ? ` — поступление отмечено, собран, ${row.numberOfSpace} мест`
+                  : ` — собран сейчас, ${row.numberOfSpace} мест`
               : ` — ${row.error}`}
           </div>
         ))}
