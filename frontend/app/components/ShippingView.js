@@ -795,6 +795,7 @@ function AssemblePreview({ preview }) {
             <tr>
               <th>Заказ</th>
               <th>Срочность</th>
+              <th>Отгрузка</th>
               <th style={{ textAlign: 'right' }}>Позиций</th>
               <th style={{ textAlign: 'right' }}>Мест</th>
               <th>Товары</th>
@@ -827,6 +828,11 @@ function AssemblePreview({ preview }) {
                     )}
                   </td>
                   <td style={{ color: urgency?.color }}>{urgency?.label || '—'}</td>
+                  <td className="num t-dim" title="Плановая передача курьеру — дата из кабинета Kaspi">
+                    {order.ship_date
+                      ? new Date(order.ship_date).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })
+                      : '—'}
+                  </td>
                   <td className="num" style={{ textAlign: 'right' }}>{order.positionsCount}</td>
                   <td className="num" style={{ textAlign: 'right', fontWeight: 600 }}>{order.numberOfSpace}</td>
                   <td className="t-dim" style={{ maxWidth: 280 }}>

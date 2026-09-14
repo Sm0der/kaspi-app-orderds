@@ -109,8 +109,26 @@ router.get('/products/images/status', requireAdmin, async (req, res, next) => {
 // пополнение каталога картинками делается вручную, не через кнопку в интерфейсе -
 // scripts/fetch-product-images.js.
 
+// Порядок обработки заказов при формировании: срочность, затем ДАТА ПЕРЕДАЧИ КУРЬЕРУ
+// (ship_date = kaspiDelivery.courierTransmissionPlanningDate) - та самая, что продавец
+// видит в кабинете и которую через API не подвинуть. Дата доставки клиенту
+// (delivery_date) идёт на 1-3 дня позже и для отгрузки не годится - остаётся
+// последним разделителем, когда даты передачи совпадают или их нет.
+const URGENCY_RANK = { overdue: 0, today: 1, soon: 2, upcoming: 3 };
+const FAR_FUTURE = new Date(8640000000000000);
+
+function byShippingPriority(a, b) {
+  const ra = URGENCY_RANK[a.urgency] ?? 4;
+  const rb = URGENCY_RANK[b.urgency] ?? 4;
+  if (ra !== rb) return ra - rb;
+  const sa = a.ship_date ? new Date(a.ship_date) : FAR_FUTURE;
+  const sb = b.ship_date ? new Date(b.ship_date) : FAR_FUTURE;
+  if (+sa !== +sb) return sa - sb;
+  return new Date(a.delivery_date || 0) - new Date(b.delivery_date || 0);
+}
+
 // GET /api/orders/by-sku - Найти все ещё не отправленные заказы с этим SKU,
-// отсортированные по приоритету срочности/дате доставки
+// отсортированные по приоритету: срочность, затем дата передачи курьеру
 router.get('/by-sku', async (req, res, next) => {
   try {
     const { sku, storeId } = req.query;
@@ -126,7 +144,8 @@ router.get('/by-sku', async (req, res, next) => {
     }
 
     const result = await db.query(`
-      SELECT DISTINCT o.order_code, o.stage, o.urgency, o.delivery_date, o.store_id, s.name as store_name,
+      SELECT DISTINCT o.order_code, o.stage, o.urgency, o.delivery_date, o.ship_date, o.store_id,
+        s.name as store_name,
         oi.quantity as sku_quantity,
         (o.stage = 'packed') AS assembled
       FROM orders o
@@ -135,13 +154,7 @@ router.get('/by-sku', async (req, res, next) => {
       WHERE ${where}
     `, params);
 
-    const urgencyRank = { overdue: 0, today: 1, soon: 2, upcoming: 3 };
-    const orders = result.rows.sort((a, b) => {
-      const ra = urgencyRank[a.urgency] ?? 4;
-      const rb = urgencyRank[b.urgency] ?? 4;
-      if (ra !== rb) return ra - rb;
-      return new Date(a.delivery_date || 0) - new Date(b.delivery_date || 0);
-    });
+    const orders = result.rows.sort(byShippingPriority);
 
     res.json({ sku, count: orders.length, orders });
   } catch (error) {
@@ -177,7 +190,8 @@ router.get('/by-name', async (req, res, next) => {
     }
 
     const result = await db.query(`
-      SELECT DISTINCT o.order_code, o.stage, o.urgency, o.delivery_date, o.store_id, s.name AS store_name,
+      SELECT DISTINCT o.order_code, o.stage, o.urgency, o.delivery_date, o.ship_date, o.store_id,
+        s.name AS store_name,
         oi.sku, oi.name AS item_name, oi.quantity AS sku_quantity,
         COALESCE(p.spaces_per_unit, 1) AS spaces_per_unit,
         (o.stage = 'packed') AS assembled
@@ -188,13 +202,7 @@ router.get('/by-name', async (req, res, next) => {
       WHERE ${where}
     `, params);
 
-    const urgencyRank = { overdue: 0, today: 1, soon: 2, upcoming: 3 };
-    const orders = result.rows.sort((a, b) => {
-      const ra = urgencyRank[a.urgency] ?? 4;
-      const rb = urgencyRank[b.urgency] ?? 4;
-      if (ra !== rb) return ra - rb;
-      return new Date(a.delivery_date || 0) - new Date(b.delivery_date || 0);
-    });
+    const orders = result.rows.sort(byShippingPriority);
 
     // Разбивка по артикулам: что именно нашлось под этим наименованием и с каким правилом
     // упаковки поедет. Один заказ может попасть в несколько строк, если в нём разные товары.
@@ -264,16 +272,7 @@ router.post('/allocate-preview', async (req, res, next) => {
       GROUP BY o.id, s.id
     `, params);
 
-    const urgencyRank = { overdue: 0, today: 1, soon: 2, upcoming: 3 };
-    const candidates = result.rows.sort((a, b) => {
-      const ra = urgencyRank[a.urgency] ?? 4;
-      const rb = urgencyRank[b.urgency] ?? 4;
-      if (ra !== rb) return ra - rb;
-      const sa = a.ship_date ? new Date(a.ship_date) : new Date(8640000000000000);
-      const sb = b.ship_date ? new Date(b.ship_date) : new Date(8640000000000000);
-      if (+sa !== +sb) return sa - sb;
-      return new Date(a.delivery_date || 0) - new Date(b.delivery_date || 0);
-    });
+    const candidates = result.rows.sort(byShippingPriority);
 
     // Набираем под наличие. Уже собранные (packed) наличие не тратят - их накладная
     // просто переиспользуется при формировании, товар под них уже был отложен раньше.
@@ -382,6 +381,8 @@ router.get('/assemble-preview', async (req, res, next) => {
         stage: o.stage,
         urgency: o.urgency,
         delivery_date: o.delivery_date,
+        // Дата передачи курьеру - по ней и идёт отгрузка, её и показываем
+        ship_date: o.ship_date,
         positionsCount: o.positionsCount,
         numberOfSpace: o.numberOfSpace,
         pre_order: o.pre_order || false,
