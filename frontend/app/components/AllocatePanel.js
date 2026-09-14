@@ -102,7 +102,18 @@ export default function AllocatePanel({ storeId, onDone }) {
         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
           <label className="field" style={{ flex: '1 1 200px' }}>
             <span className="eyebrow">Артикул</span>
-            <input className="input" value={sku} onChange={(e) => setSku(e.target.value)} placeholder="107549383" />
+            <input
+              className="input"
+              value={sku}
+              onChange={(e) => {
+                setSku(e.target.value);
+                // Правило принадлежит артикулу, а не панели: если его не сбросить, значение
+                // от прошлого товара применилось бы к новому прямо при «Разложить».
+                setPackingValue('');
+                setPlan(null);
+              }}
+              placeholder="107549383"
+            />
           </label>
           <label className="field" style={{ width: 140 }}>
             <span className="eyebrow">Готово, шт</span>
@@ -124,8 +135,8 @@ export default function AllocatePanel({ storeId, onDone }) {
               step="0.01"
               value={packingValue}
               onChange={(e) => setPackingValue(e.target.value)}
-              placeholder="1"
-              title="Правило упаковки этого товара. Применяется сразу при раскладке — число мест видно в таблице ниже."
+              placeholder="как сейчас"
+              title="Правило упаковки этого товара. Пусто — оставляем как есть; вписанное число применяется при «Разложить», и число мест сразу видно в таблице ниже."
             />
           </label>
           <button className="btn" onClick={allocate} disabled={busy}>

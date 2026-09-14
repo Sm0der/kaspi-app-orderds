@@ -118,6 +118,8 @@ export default function ShippingView({ orders, summary, loading, filters, setFil
       } else {
         setCodesInput(codes.join('\n'));
         setPackingSku(value);
+        setPackingValue('');
+        setPackingSaved(null);
       }
     } catch (err) {
       setError(errorText(err, 'Не удалось найти заказы по артикулу'));
@@ -381,7 +383,13 @@ export default function ShippingView({ orders, summary, loading, filters, setFil
                 <input
                   className="input mono"
                   value={packingSku}
-                  onChange={(e) => setPackingSku(e.target.value)}
+                  onChange={(e) => {
+                    setPackingSku(e.target.value);
+                    // Значение принадлежит артикулу: иначе правило прошлого товара
+                    // осталось бы в поле и ушло бы новому по кнопке «Сохранить».
+                    setPackingValue('');
+                    setPackingSaved(null);
+                  }}
                   placeholder="108268540"
                 />
               </div>
