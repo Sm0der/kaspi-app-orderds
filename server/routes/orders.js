@@ -17,9 +17,12 @@ router.get('/products/suggest', async (req, res, next) => {
       params.push(storeId);
       whereClauses.push(`store_id = $${params.length}`);
     }
+    // По словам и через И - как и фильтр заказов, чтобы подсказка не расходилась с поиском
     if (q) {
-      params.push(`%${q}%`);
-      whereClauses.push(`name ILIKE $${params.length}`);
+      for (const word of String(q).trim().split(/\s+/).filter(Boolean).slice(0, 8)) {
+        params.push(`%${word}%`);
+        whereClauses.push(`name ILIKE $${params.length}`);
+      }
     }
 
     params.push(Math.min(parseInt(limit) || 200, 500));
@@ -141,6 +144,82 @@ router.get('/by-sku', async (req, res, next) => {
     });
 
     res.json({ sku, count: orders.length, orders });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /api/orders/by-name - То же, что by-sku, но по наименованию товара: под один запрос
+// («туалетный стол») попадает несколько разных артикулов, и формировать их нужно вместе.
+// Слова ищутся по И, каждое как подстрока, поэтому порядок слов не важен: «туалетный стол»
+// находит и «Туалетный столик Mebellion», и «Стол туалетный белый».
+// Кроме заказов отдаёт разбивку по артикулам с их правилом упаковки - у разных артикулов
+// оно разное, а от него зависит число мест в накладной.
+router.get('/by-name', async (req, res, next) => {
+  try {
+    const name = String(req.query.name || '').trim();
+    const { storeId } = req.query;
+    if (!name) {
+      return res.status(400).json({ error: 'Нужен параметр name' });
+    }
+
+    const words = name.split(/\s+/).filter(Boolean).slice(0, 8);
+    const params = [];
+    const nameClauses = words.map(word => {
+      params.push(`%${word}%`);
+      return `oi.name ILIKE $${params.length}`;
+    });
+
+    let where = `${nameClauses.join(' AND ')} AND o.stage IN ('new', 'accepted', 'packed')`;
+    if (storeId) {
+      params.push(storeId);
+      where += ` AND o.store_id = $${params.length}`;
+    }
+
+    const result = await db.query(`
+      SELECT DISTINCT o.order_code, o.stage, o.urgency, o.delivery_date, o.store_id, s.name AS store_name,
+        oi.sku, oi.name AS item_name, oi.quantity AS sku_quantity,
+        COALESCE(p.spaces_per_unit, 1) AS spaces_per_unit,
+        (o.stage = 'packed') AS assembled
+      FROM orders o
+      JOIN order_items oi ON oi.order_id = o.id
+      LEFT JOIN stores s ON s.id = o.store_id
+      LEFT JOIN products p ON p.store_id = o.store_id AND p.sku = oi.sku
+      WHERE ${where}
+    `, params);
+
+    const urgencyRank = { overdue: 0, today: 1, soon: 2, upcoming: 3 };
+    const orders = result.rows.sort((a, b) => {
+      const ra = urgencyRank[a.urgency] ?? 4;
+      const rb = urgencyRank[b.urgency] ?? 4;
+      if (ra !== rb) return ra - rb;
+      return new Date(a.delivery_date || 0) - new Date(b.delivery_date || 0);
+    });
+
+    // Разбивка по артикулам: что именно нашлось под этим наименованием и с каким правилом
+    // упаковки поедет. Один заказ может попасть в несколько строк, если в нём разные товары.
+    const byProduct = new Map();
+    for (const row of orders) {
+      if (!byProduct.has(row.sku)) {
+        byProduct.set(row.sku, {
+          sku: row.sku,
+          name: row.item_name,
+          spacesPerUnit: Number(row.spaces_per_unit),
+          ordersCount: 0,
+          units: 0
+        });
+      }
+      const entry = byProduct.get(row.sku);
+      entry.ordersCount += 1;
+      entry.units += Number(row.sku_quantity) || 0;
+    }
+
+    res.json({
+      name,
+      count: orders.length,
+      orders,
+      products: [...byProduct.values()].sort((a, b) => b.units - a.units)
+    });
   } catch (error) {
     next(error);
   }
@@ -355,12 +434,20 @@ router.get('/summary', async (req, res, next) => {
       params.push(orderDateTo);
       whereClauses.push(`o.order_date < $${params.length}::date + INTERVAL '1 day'`);
     }
+    // Поиск по товару - по словам, каждое подстрокой и все вместе (И). Простая подстрока
+    // целиком спотыкалась о порядок слов: «туалетный стол» не находил «Стол туалетный белый».
     if (product) {
-      params.push(`%${product}%`);
-      whereClauses.push(`EXISTS (
-        SELECT 1 FROM order_items oi2
-        WHERE oi2.order_id = o.id AND oi2.name ILIKE $${params.length}
-      )`);
+      const words = String(product).trim().split(/\s+/).filter(Boolean).slice(0, 8);
+      if (words.length > 0) {
+        const clauses = words.map(word => {
+          params.push(`%${word}%`);
+          return `oi2.name ILIKE $${params.length}`;
+        });
+        whereClauses.push(`EXISTS (
+          SELECT 1 FROM order_items oi2
+          WHERE oi2.order_id = o.id AND ${clauses.join(' AND ')}
+        )`);
+      }
     }
 
     // Отдаём только нужные колонки, без raw_data: полный JSON заказа весит пару килобайт,

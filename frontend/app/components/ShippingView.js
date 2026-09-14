@@ -95,6 +95,43 @@ export default function ShippingView({ orders, summary, loading, filters, setFil
 
   const orderCodes = () => codesInput.split(/[\s,;]+/).map((s) => s.trim()).filter(Boolean);
 
+  // — поиск заказов по наименованию —
+  // Под одно наименование («туалетный стол») попадает несколько артикулов, поэтому здесь
+  // не один sku, а список найденных товаров, у каждого своё правило упаковки.
+  const [nameQuery, setNameQuery] = useState('');
+  const [nameBusy, setNameBusy] = useState(false);
+  const [nameFound, setNameFound] = useState(null);
+
+  const findByName = async () => {
+    const value = nameQuery.trim();
+    if (!value) return setError('Введите наименование товара');
+
+    setNameBusy(true);
+    setError(null);
+    setNameFound(null);
+    setSkuFound(null);
+    setPreview(null);
+    setResults(null);
+
+    try {
+      const { data } = await api.get('/api/orders/by-name', {
+        params: { name: value, storeId: storeId || undefined }
+      });
+      const codes = [...new Set(data.orders.map((o) => o.order_code))];
+      setNameFound({ ...data, codes });
+
+      if (codes.length === 0) {
+        setError(`Неотправленных заказов с товаром «${value}» не найдено`);
+      } else {
+        setCodesInput(codes.join('\n'));
+      }
+    } catch (err) {
+      setError(errorText(err, 'Не удалось найти заказы по наименованию'));
+    } finally {
+      setNameBusy(false);
+    }
+  };
+
   const findBySku = async () => {
     const value = sku.trim();
     if (!value) return setError('Введите артикул товара');
@@ -112,6 +149,7 @@ export default function ShippingView({ orders, summary, loading, filters, setFil
       const codes = data.orders.map((o) => o.order_code);
       const alreadyAssembled = data.orders.filter((o) => o.assembled).length;
       setSkuFound({ sku: value, count: codes.length, alreadyAssembled });
+      setNameFound(null);
 
       if (codes.length === 0) {
         setError(`Неотправленных заказов с артикулом «${value}» не найдено`);
@@ -344,20 +382,85 @@ export default function ShippingView({ orders, summary, loading, filters, setFil
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: 16, marginBottom: 22 }}>
         <section className="panel rise">
           <div className="panel-head">
-            <h2>Найти заказы по артикулу</h2>
+            <h2>Найти заказы по товару</h2>
           </div>
           <div className="panel-body">
             <p className="panel-note" style={{ marginBottom: 16 }}>
-              Укажите артикул — система найдёт все неотправленные заказы с этим товаром,
-              отсортирует по срочности и подставит номера в соседнюю панель.
+              По наименованию или по артикулу. Система найдёт все неотправленные заказы с этим
+              товаром, отсортирует по срочности и подставит номера в соседнюю панель.
             </p>
+
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+              <div className="field" style={{ flex: '1 1 240px' }}>
+                <label>Наименование</label>
+                <input
+                  className="input"
+                  value={nameQuery}
+                  onChange={(e) => setNameQuery(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') findByName(); }}
+                  placeholder="туалетный стол"
+                  title="Ищем по всем словам сразу, порядок не важен: «туалетный стол» найдёт и «Стол туалетный белый»"
+                />
+              </div>
+              <button className="btn btn-primary" onClick={findByName} disabled={nameBusy || !nameQuery.trim()}>
+                {nameBusy && <span className="spinner" />} Найти
+              </button>
+            </div>
+
+            {nameFound && nameFound.codes.length > 0 && (
+              <div style={{ marginTop: 14 }}>
+                <div className="alert alert-ok">
+                  Найдено заказов: <strong>{nameFound.codes.length}</strong>, товаров под
+                  наименованием «{nameFound.name}» — {nameFound.products.length}. Номера подставлены.
+                </div>
+                <div className="table-wrap">
+                  <table className="data">
+                    <thead>
+                      <tr>
+                        <th>Товар</th>
+                        <th>Артикул</th>
+                        <th style={{ textAlign: 'right' }}>Шт</th>
+                        <th style={{ textAlign: 'right' }}>Мест на 1 шт</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {nameFound.products.map((p) => (
+                        <tr key={p.sku}>
+                          <td style={{ maxWidth: 260 }}>{p.name}</td>
+                          <td className="num t-dim mono">{p.sku}</td>
+                          <td className="num" style={{ textAlign: 'right' }}>{p.units}</td>
+                          <td className="num" style={{ textAlign: 'right' }}>
+                            <button
+                              className="btn btn-quiet btn-sm"
+                              onClick={() => { setPackingSku(p.sku); setPackingValue(''); setPackingSaved(null); }}
+                              title="Подставить артикул в правило упаковки ниже"
+                            >
+                              {p.spacesPerUnit} ✎
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            <div className="divider" style={{ width: '100%', height: 1, background: 'var(--line)', margin: '18px 0' }} />
+
             <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
               <div className="field" style={{ flex: '1 1 150px' }}>
                 <label>Артикул</label>
-                <input className="input mono" value={sku} onChange={(e) => setSku(e.target.value)} placeholder="108268540" />
+                <input
+                  className="input mono"
+                  value={sku}
+                  onChange={(e) => setSku(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') findBySku(); }}
+                  placeholder="108268540"
+                />
               </div>
-              <button className="btn btn-primary" onClick={findBySku} disabled={skuBusy || !sku.trim()}>
-                {skuBusy && <span className="spinner" />} Найти
+              <button className="btn" onClick={findBySku} disabled={skuBusy || !sku.trim()}>
+                {skuBusy && <span className="spinner" />} Найти по артикулу
               </button>
             </div>
             {skuFound && skuFound.count > 0 && (
