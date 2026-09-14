@@ -736,7 +736,12 @@ router.post('/assemble-batch', async (req, res, next) => {
       // накладную с новым номером - тот самый дубль, который путает при сборке. Теперь просто
       // переиспользуем то, что Kaspi уже сформировал: заказ входит в этот вывоз (и в его ZIP),
       // но к Kaspi за этим не обращаемся.
-      if (order.stage === 'packed') {
+      // «Уже собран» определяем не только по нашему stage, но и по накладной в самих данных
+      // Kaspi: копия в базе живёт до ближайшего синка, и если заказ за это время сформировали
+      // в кабинете, stage у нас ещё 'accepted'. Раньше такой заказ уезжал на ARRIVED и получал
+      // от Kaspi «To mark as arrived order, order should be not delivered to city» - ошибку,
+      // которая выглядит пугающе, хотя на деле всё в порядке: накладная уже есть.
+      if (order.stage === 'packed' || order.waybill_number) {
         results.push({
           order_code: order.order_code,
           success: true,
