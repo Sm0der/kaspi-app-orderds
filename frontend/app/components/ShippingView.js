@@ -8,6 +8,7 @@ import {
 } from '../lib/labels';
 import Thumb from './Thumb';
 import AllocatePanel from './AllocatePanel';
+import FailedCodes from './FailedCodes';
 
 const TONE_COLOR = {
   red: 'var(--red)',
@@ -883,6 +884,8 @@ function AssembleResults({ results }) {
         , {results.failed} с ошибкой — из {results.total}
       </div>
 
+      <FailedCodes results={results} />
+
       {ok.length > 0 && (
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
           <button
@@ -912,6 +915,11 @@ function AssembleResults({ results }) {
                   ? ` — поступление отмечено, собран, ${row.numberOfSpace} мест`
                   : ` — собран сейчас, ${row.numberOfSpace} мест`
               : ` — ${row.error}`}
+            {row.despiteError && (
+              <div className="t-dim" style={{ fontSize: 11.5, marginLeft: 18 }}>
+                Kaspi ответил ошибкой, но накладную выпустил — проверьте номер в кабинете. {row.despiteError}
+              </div>
+            )}
           </div>
         ))}
       </div>

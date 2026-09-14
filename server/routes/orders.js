@@ -109,10 +109,40 @@ router.get('/products/images/status', requireAdmin, async (req, res, next) => {
 // пополнение каталога картинками делается вручную, не через кнопку в интерфейсе -
 // scripts/fetch-product-images.js.
 
+// Kaspi умеет ответить ошибкой на ASSEMBLE, хотя заказ при этом фактически собрался -
+// проверено на живом заказе 1071208448: пришло их внутреннее "Unexpected exception",
+// а накладная в кабинете появилась. Записать такой заказ в отказ опасно: он останется
+// «несобранным», его попробуют собрать ещё раз, и Kaspi выпустит ВТОРУЮ накладную с новым
+// номером - на складе это расходится с тем, что наклеено на коробке.
+// Поэтому перед тем как признать отказ, спрашиваем у Kaspi, как оно на самом деле.
+// Накладная появляется не мгновенно, отсюда пауза.
+async function confirmAssembledInKaspi(service, kaspiOrderId) {
+  await new Promise(resolve => setTimeout(resolve, 5000));
+  try {
+    const data = await service.getOrderDetails(kaspiOrderId);
+    const attributes = data?.attributes || {};
+    const waybillNumber = attributes.kaspiDelivery?.waybillNumber || null;
+    return attributes.assembled === true || Boolean(waybillNumber) ? { waybillNumber } : null;
+  } catch {
+    return null;
+  }
+}
+
 // Ошибки Kaspi приходят по-английски и иногда сформулированы так, что человек читает их
 // как поломку нашего сервиса. Переводим в то, что с заказом делать дальше.
 function readableKaspiError(error) {
   const title = error.response?.data?.errors?.[0]?.title;
+  const anyText = `${title || ''} ${error.message || ''} ${JSON.stringify(error.response?.data || '')}`;
+
+  // Внутренний сбой на стороне Kaspi. Он приходит простынёй на пол-экрана - это их
+  // Java-исключение, которое их же шлюз не смог разобрать (их MessageDTO не знает поля
+  // "description", которое они сами и прислали). Человеку из этого нужен только один
+  // факт и один идентификатор: Kaspi просит передать его в поддержку.
+  const exceptionId = anyText.match(/"exceptionId"\s*:\s*"([0-9a-f]{8,})"/i)?.[1];
+  if (exceptionId) {
+    return `Сбой на стороне Kaspi (код для их поддержки: ${exceptionId}). Заказ можно сформировать в кабинете Kaspi`;
+  }
+
   if (!title) return error.message;
 
   // Заказ существует и читается через GET, но смену статуса Kaspi по нему не принимает.
@@ -753,6 +783,9 @@ router.post('/assemble-batch', async (req, res, next) => {
         continue;
       }
 
+      // Объявлено до try: понадобится и в catch, когда будем разбирать ложный отказ
+      let arrived = false;
+
       try {
         // Заказ ещё не принят продавцом - сначала принимаем, потом комплектуем
         if (order.stage === 'new') {
@@ -762,7 +795,6 @@ router.post('/assemble-batch', async (req, res, next) => {
         // Предзаказ: Kaspi отклонит ASSEMBLE, пока товар не отмечен поступившим (ARRIVED).
         // Шлём ARRIVED только при явном подтверждении наличия - иначе честно отказываем,
         // чтобы случайно не заявить Kaspi о поступлении того, чего нет (грозит штрафом).
-        let arrived = false;
         if (order.pre_order) {
           if (!allowPreorderArrived) {
             results.push({
@@ -799,6 +831,25 @@ router.post('/assemble-batch', async (req, res, next) => {
           numberOfSpace: order.numberOfSpace
         });
       } catch (error) {
+        // Ошибка могла быть ложной - Kaspi иногда падает уже после того, как собрал заказ
+        const actuallyAssembled = await confirmAssembledInKaspi(storeConfig.service, order.kaspi_order_id);
+        if (actuallyAssembled) {
+          results.push({
+            order_code: order.order_code,
+            success: true,
+            reused: false,
+            arrived,
+            preOrder: order.pre_order || false,
+            urgency: order.urgency,
+            positionsCount: order.positionsCount,
+            numberOfSpace: order.numberOfSpace,
+            // Kaspi ответил ошибкой, но накладную выпустил - показываем это честно,
+            // чтобы человек знал, почему заказ «прошёл со звёздочкой»
+            despiteError: readableKaspiError(error)
+          });
+          continue;
+        }
+
         results.push({
           order_code: order.order_code,
           success: false,

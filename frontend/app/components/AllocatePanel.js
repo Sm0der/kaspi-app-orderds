@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { api, downloadFile, errorText } from '../lib/api';
+import FailedCodes from './FailedCodes';
 
 // Формирование по наличию. Продавец вводит артикул и сколько штук готово; система
 // раскладывает несобранные заказы по приоритету (срочность -> дата отгрузки) под это
@@ -278,6 +279,8 @@ function AllocateResults({ results }) {
         {arrivedCount > 0 && <> (из них {arrivedCount} предзаказ(ов) отмечены поступившими)</>}
         , {results.failed} с ошибкой — из {results.total}
       </div>
+
+      <FailedCodes results={results} />
 
       {ok.length > 0 && (
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
