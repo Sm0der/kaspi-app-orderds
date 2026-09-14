@@ -109,6 +109,28 @@ router.get('/products/images/status', requireAdmin, async (req, res, next) => {
 // пополнение каталога картинками делается вручную, не через кнопку в интерфейсе -
 // scripts/fetch-product-images.js.
 
+// Ошибки Kaspi приходят по-английски и иногда сформулированы так, что человек читает их
+// как поломку нашего сервиса. Переводим в то, что с заказом делать дальше.
+function readableKaspiError(error) {
+  const title = error.response?.data?.errors?.[0]?.title;
+  if (!title) return error.message;
+
+  // Заказ существует и читается через GET, но смену статуса Kaspi по нему не принимает.
+  // Обходных путей через API нет - только кабинет продавца.
+  if (title === 'Order not found') {
+    return 'Kaspi не принимает смену статуса по этому заказу — сформируйте его в кабинете Kaspi';
+  }
+  // Единственное внятное объяснение, которое Kaspi даёт по предзаказам: отметить поступление
+  // можно, только пока заказ не уехал в город назначения. Шаблон приходит с незаполненным %s.
+  if (title.startsWith('To mark as arrived order')) {
+    return 'Товар уже отправлен в город назначения — отметить поступление нельзя. Формируйте в кабинете Kaspi';
+  }
+  if (title.startsWith('The current order status does not allow')) {
+    return 'Kaspi не разрешает это действие в текущем статусе заказа (для предзаказа — товар не отмечен поступившим)';
+  }
+  return title;
+}
+
 // Порядок обработки заказов при формировании: срочность, затем ДАТА ПЕРЕДАЧИ КУРЬЕРУ
 // (ship_date = kaspiDelivery.courierTransmissionPlanningDate) - та самая, что продавец
 // видит в кабинете и которую через API не подвинуть. Дата доставки клиенту
@@ -772,13 +794,11 @@ router.post('/assemble-batch', async (req, res, next) => {
           numberOfSpace: order.numberOfSpace
         });
       } catch (error) {
-        const kaspiError = error.response?.data?.errors?.[0]?.title;
-        // "Order not found" от Kaspi на смене статуса читается как «нет такого заказа»,
-        // хотя заказ есть - переводим в то, что с ним делать дальше.
-        const readable = kaspiError === 'Order not found'
-          ? 'Kaspi не принимает смену статуса по этому заказу — сформируйте его в кабинете Kaspi'
-          : kaspiError;
-        results.push({ order_code: order.order_code, success: false, error: readable || error.message });
+        results.push({
+          order_code: order.order_code,
+          success: false,
+          error: readableKaspiError(error)
+        });
       }
     }
 
