@@ -909,7 +909,9 @@ function AssembleResults({ results }) {
           <div key={i} style={{ color: row.success ? (row.reused ? 'var(--steel)' : 'var(--sage)') : 'var(--red)' }}>
             <span className="mono">{row.order_code}</span>
             {row.success
-              ? row.reused
+              ? row.alreadyAssembledInKaspi
+                ? ' — уже собран в Kaspi (в кабинете или с опозданием), повторно не отправляли'
+                : row.reused
                 ? ` — уже был собран, накладная переиспользована (${row.numberOfSpace} мест)`
                 : row.arrived
                   ? ` — поступление отмечено, собран, ${row.numberOfSpace} мест`

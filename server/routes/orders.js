@@ -140,7 +140,7 @@ function readableKaspiError(error) {
   // факт и один идентификатор: Kaspi просит передать его в поддержку.
   const exceptionId = anyText.match(/"exceptionId"\s*:\s*"([0-9a-f]{8,})"/i)?.[1];
   if (exceptionId) {
-    return `Сбой на стороне Kaspi (код для их поддержки: ${exceptionId}). Заказ можно сформировать в кабинете Kaspi`;
+    return `Сбой на стороне Kaspi (код для их поддержки: ${exceptionId}). Kaspi может выпустить накладную с опозданием в несколько минут — сначала проверьте заказ в кабинете, и только если он не собран, формируйте`;
   }
 
   if (!title) return error.message;
@@ -150,10 +150,12 @@ function readableKaspiError(error) {
   if (title === 'Order not found') {
     return 'Kaspi не принимает смену статуса по этому заказу — сформируйте его в кабинете Kaspi';
   }
-  // Единственное внятное объяснение, которое Kaspi даёт по предзаказам: отметить поступление
-  // можно, только пока заказ не уехал в город назначения. Шаблон приходит с незаполненным %s.
+  // "To mark as arrived order, order should be not delivered to city" (шаблон с незаполненным %s).
+  // Буквально текст не верить: по штампам PDF такие заказы на момент отказа ещё не были
+  // собраны и никуда не уехали - их потом штатно сформировали в кабинете. Что именно Kaspi
+  // имеет в виду, не установлено, поэтому человеку пишем только то, что точно известно.
   if (title.startsWith('To mark as arrived order')) {
-    return 'Товар уже отправлен в город назначения — отметить поступление нельзя. Формируйте в кабинете Kaspi';
+    return 'Kaspi не разрешил отметить поступление по этому заказу — сформируйте его в кабинете Kaspi';
   }
   if (title.startsWith('The current order status does not allow')) {
     return 'Kaspi не разрешает это действие в текущем статусе заказа (для предзаказа — товар не отмечен поступившим)';
@@ -768,9 +770,8 @@ router.post('/assemble-batch', async (req, res, next) => {
       // но к Kaspi за этим не обращаемся.
       // «Уже собран» определяем не только по нашему stage, но и по накладной в самих данных
       // Kaspi: копия в базе живёт до ближайшего синка, и если заказ за это время сформировали
-      // в кабинете, stage у нас ещё 'accepted'. Раньше такой заказ уезжал на ARRIVED и получал
-      // от Kaspi «To mark as arrived order, order should be not delivered to city» - ошибку,
-      // которая выглядит пугающе, хотя на деле всё в порядке: накладная уже есть.
+      // в кабинете, stage у нас ещё 'accepted' - без этой проверки его собрали бы повторно,
+      // а повторный ASSEMBLE выпускает накладную с новым номером.
       if (order.stage === 'packed' || order.waybill_number) {
         results.push({
           order_code: order.order_code,
@@ -781,6 +782,32 @@ router.post('/assemble-batch', async (req, res, next) => {
           numberOfSpace: order.numberOfSpace
         });
         continue;
+      }
+
+      // Последняя проверка перед любым действием - живое состояние заказа у самого Kaspi.
+      // Наша копия бывает устаревшей, а Kaspi умеет выпустить накладную спустя минуты после
+      // того, как ответил ошибкой (1071208448: ошибка в 17:36:55, накладная в 17:39:02, а
+      // соседи по пакету получили свои за 7-13 с). Проверка после ошибки такой случай не
+      // ловит - ждать минуты в запросе нельзя. Зато перед повторной отправкой накладная уже
+      // видна, и второй ASSEMBLE (он перевыпускает накладную с новым номером) не уйдёт.
+      // Если Kaspi не ответил на чтение - не блокируем формирование, работаем как раньше.
+      try {
+        const live = await storeConfig.service.getOrderDetails(order.kaspi_order_id);
+        const liveWaybill = live?.attributes?.kaspiDelivery?.waybillNumber;
+        if (live?.attributes?.assembled === true || liveWaybill) {
+          results.push({
+            order_code: order.order_code,
+            success: true,
+            reused: true,
+            alreadyAssembledInKaspi: true,
+            urgency: order.urgency,
+            positionsCount: order.positionsCount,
+            numberOfSpace: order.numberOfSpace
+          });
+          continue;
+        }
+      } catch {
+        // чтение не удалось - решает дальнейший поток
       }
 
       // Объявлено до try: понадобится и в catch, когда будем разбирать ложный отказ
@@ -866,7 +893,11 @@ router.post('/assemble-batch', async (req, res, next) => {
     // и подставила настоящий номер накладной.
     // Переиспользованные (reused) заказы уже в stage 'packed' - трогать их не нужно,
     // обновляем только тех, кого собрали сейчас впервые.
-    const newlyAssembled = results.filter(r => r.success && !r.reused).map(r => r.order_code);
+    // Сюда же - заказы, которые наша копия считала несобранными, а Kaspi уже собрал: иначе
+    // stage у нас так и останется 'accepted' до следующего синка
+    const newlyAssembled = results
+      .filter(r => r.success && (!r.reused || r.alreadyAssembledInKaspi))
+      .map(r => r.order_code);
     if (newlyAssembled.length > 0) {
       await db.query(
         `UPDATE orders
