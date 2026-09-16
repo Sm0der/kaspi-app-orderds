@@ -11,6 +11,7 @@ export const ROLES = [
   'PACKER',
   'WORKSHOP_MASTER',
   'WORKSHOP_WORKER',
+  'TECHNOLOGIST',
 ] as const;
 
 export type Role = (typeof ROLES)[number];
@@ -24,6 +25,7 @@ export const ROLE_LABELS: Record<Role, string> = {
   PACKER: 'Упаковщик',
   WORKSHOP_MASTER: 'Мастер цеха',
   WORKSHOP_WORKER: 'Рабочий цеха',
+  TECHNOLOGIST: 'Технолог',
 };
 
 export const ROLE_HINTS: Record<Role, string> = {
@@ -34,6 +36,7 @@ export const ROLE_HINTS: Record<Role, string> = {
   PACKER: 'Печать этикеток на коробки',
   WORKSHOP_MASTER: 'Задачи своего цеха и его показатели',
   WORKSHOP_WORKER: 'Задачи своего цеха',
+  TECHNOLOGIST: 'Себестоимость изделий: спецификации, цены материалов, нормы присадки',
 };
 
 /** Ролям цеха обязателен цех: без него человек войдёт, но не увидит ни одной задачи */
@@ -49,6 +52,7 @@ export const AREAS = {
   inventory: ['ADMIN', 'MANAGER', 'WAREHOUSE_RECEIVER', 'WAREHOUSE_SHIPPER'],
   production: ['ADMIN', 'WORKSHOP_MASTER', 'WORKSHOP_WORKER'],
   productionStats: ['ADMIN', 'MANAGER', 'WORKSHOP_MASTER'],
+  costing: ['ADMIN', 'TECHNOLOGIST'],
   admin: ['ADMIN'],
 } as const satisfies Record<string, readonly Role[]>;
 

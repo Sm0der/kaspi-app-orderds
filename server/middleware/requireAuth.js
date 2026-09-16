@@ -13,12 +13,13 @@ if (!JWT_SECRET) {
   console.error('⚠️  JWT_SECRET не задан - вход работать не будет. Значение то же, что у приложения склада.');
 }
 
-// Ролей в системе семь (см. src/lib/roles.ts у склада), но дашборду заказов важны две:
-// владелец видит настройки, менеджер работает с заказами. Всем остальным - упаковщику,
-// кладовщику, цеху - здесь делать нечего, их место на складе.
+// Ролей в системе восемь (см. src/lib/roles.ts у склада), но в дашборде работают три:
+// владелец видит всё, менеджер - заказы, технолог - только себестоимость. Остальным -
+// упаковщику, кладовщику, цеху - здесь делать нечего, их место на складе.
 const DASHBOARD_ROLES = {
   ADMIN: 'admin',
   MANAGER: 'manager',
+  TECHNOLOGIST: 'technologist',
 };
 
 async function roleFor(email) {
@@ -79,5 +80,15 @@ function requireAdmin(req, res, next) {
   next();
 }
 
+// Себестоимость ведёт технолог, видит её ещё владелец. Менеджеру и складу закрыто:
+// в ней закупочные цены и маржа - это не та цифра, которая нужна на отгрузке.
+function requireCosting(req, res, next) {
+  if (req.userRole !== 'admin' && req.userRole !== 'technologist') {
+    return res.status(403).json({ error: 'Раздел себестоимости доступен технологу и владельцу' });
+  }
+  next();
+}
+
 module.exports = requireAuth;
 module.exports.requireAdmin = requireAdmin;
+module.exports.requireCosting = requireCosting;

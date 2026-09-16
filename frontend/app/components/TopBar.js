@@ -12,7 +12,9 @@ export default function TopBar({
   lastSyncAt,
   onSync,
   onLogout,
-  isAdmin
+  isAdmin,
+  canCosting,
+  isTechnologist
 }) {
   return (
     <header className="topbar">
@@ -47,15 +49,24 @@ export default function TopBar({
       <div className="topbar-spacer" />
 
       <div className="segmented">
-        <button data-active={mode === 'shipping'} onClick={() => onModeChange('shipping')}>
-          Отгрузка
-        </button>
-        <button data-active={mode === 'crm'} onClick={() => onModeChange('crm')}>
-          CRM
-        </button>
-        <button data-active={mode === 'archive'} onClick={() => onModeChange('archive')}>
-          Архив
-        </button>
+        {!isTechnologist && (
+          <>
+            <button data-active={mode === 'shipping'} onClick={() => onModeChange('shipping')}>
+              Отгрузка
+            </button>
+            <button data-active={mode === 'crm'} onClick={() => onModeChange('crm')}>
+              CRM
+            </button>
+            <button data-active={mode === 'archive'} onClick={() => onModeChange('archive')}>
+              Архив
+            </button>
+          </>
+        )}
+        {canCosting && (
+          <button data-active={mode === 'costing'} onClick={() => onModeChange('costing')}>
+            Себестоимость
+          </button>
+        )}
       </div>
 
       <button className="btn" onClick={onSync} disabled={syncing} title="Забрать свежие данные из Kaspi">

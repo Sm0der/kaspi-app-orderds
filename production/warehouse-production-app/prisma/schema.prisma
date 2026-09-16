@@ -123,6 +123,7 @@ enum ProductionUserRole {
   WAREHOUSE_SHIPPER
   MANAGER
   PACKER
+  TECHNOLOGIST
 
   @@map("production_user_role")
 }

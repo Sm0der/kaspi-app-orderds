@@ -17,12 +17,24 @@ export async function GET(request: NextRequest) {
       orderBy: { name: 'asc' },
     });
 
+    // Внутренний код изделия из себестоимости (SH-4001: шкаф, 4 двери, 0 ящиков, номер 01).
+    // Технолог ведёт его в своём разделе, а на складе по нему узнают изделие быстрее,
+    // чем по названию с Kaspi - те у одного и того же шкафа разные в каждом магазине.
+    // Таблицы себестоимости ведёт сервис заказов, у Prisma их в схеме нет - отсюда сырой запрос.
+    const costCodes = await prisma.$queryRaw<{ sku: string; code: string }[]>`
+      SELECT p.sku, cp.code
+      FROM products p
+      JOIN cost_products cp ON cp.id = p.cost_product_id
+      WHERE cp.code IS NOT NULL`;
+    const codeBySku = new Map(costCodes.map((row) => [row.sku, row.code]));
+
     return NextResponse.json(
       {
         success: true,
         data: items.map((item) => ({
           id: item.id,
           code: item.code,
+          costCode: item.skus.map((link) => codeBySku.get(link.sku)).find(Boolean) || null,
           name: item.name,
           imageUrl: item.imageUrl,
           boxesPerUnit: item.boxesPerUnit,

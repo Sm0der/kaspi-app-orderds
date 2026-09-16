@@ -182,6 +182,80 @@ CREATE INDEX IF NOT EXISTS idx_orders_crm_status ON orders(crm_status_id);
 -- пользователей означали два пароля и два места, где выдавать доступ.
 -- Саму app_users в базе не трогаем - в ней запись владельца, пусть останется следом.
 
+-- ── Себестоимость ───────────────────────────────────────────────────────────
+-- Перенос таблицы главного технолога (Google Таблица, 74 листа изделий + ПРАЙС +
+-- СметаПрисадки). В таблице цена одной и той же фурнитуры лежит в каждом листе своя,
+-- и владелец попросил так и оставить: цена живёт в строке спецификации изделия.
+-- cost_items - только справочник названий и единиц, чтобы строки не расползались
+-- в опечатках и чтобы можно было поднять цену позиции сразу во всех изделиях.
+CREATE TABLE IF NOT EXISTS cost_items (
+  id SERIAL PRIMARY KEY,
+  name VARCHAR(200) NOT NULL UNIQUE,
+  unit VARCHAR(20),
+  -- 'material' | 'fittings' | 'packaging'; packaging - строка «Упаковка», её количество
+  -- и есть число коробок, от которого считаются упаковка, отправка и накладные расходы
+  kind VARCHAR(20) NOT NULL DEFAULT 'fittings',
+  -- Что позиция даёт работам: 'saw_area' - квадратура для распила (ЛДСП),
+  -- 'edge_length' - метры для кромки (ПВХ). Так расчёт повторяет формулы из ПРАЙС.
+  counts_as VARCHAR(20),
+  default_price NUMERIC(12,2),
+  position INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS cost_products (
+  id SERIAL PRIMARY KEY,
+  -- Внутренний код: SH-4001 - две буквы категория, затем двери, ящики, порядковый номер
+  code VARCHAR(20) UNIQUE,
+  name VARCHAR(200) NOT NULL,
+  category VARCHAR(4),
+  doors SMALLINT,
+  drawers SMALLINT,
+  serial_no SMALLINT,
+  -- Тарифы работ у каждого изделия свои - в листах они внизу и местами расходятся
+  rate_saw NUMERIC(10,2) NOT NULL DEFAULT 100,
+  rate_edge NUMERIC(10,2) NOT NULL DEFAULT 20,
+  rate_pack NUMERIC(10,2) NOT NULL DEFAULT 650,
+  rate_ship NUMERIC(10,2) NOT NULL DEFAULT 350,
+  rate_overhead NUMERIC(10,2) NOT NULL DEFAULT 2000,
+  -- Присадка приходит из листа СметаПрисадки готовой суммой
+  drilling_cost NUMERIC(10,2) NOT NULL DEFAULT 0,
+  -- Наценка как в ПРАЙС: база = себестоимость / 0.74, маржа = 25% базы,
+  -- опт = себестоимость + маржа, цена Kaspi = опт * 1.25
+  margin_divisor NUMERIC(6,4) NOT NULL DEFAULT 0.74,
+  margin_rate NUMERIC(6,4) NOT NULL DEFAULT 0.25,
+  kaspi_markup NUMERIC(6,4) NOT NULL DEFAULT 0.25,
+  source_tab VARCHAR(80),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_cost_products_code ON cost_products(code);
+
+CREATE TABLE IF NOT EXISTS cost_product_items (
+  id SERIAL PRIMARY KEY,
+  product_id INTEGER NOT NULL REFERENCES cost_products(id) ON DELETE CASCADE,
+  item_id INTEGER NOT NULL REFERENCES cost_items(id),
+  quantity NUMERIC(12,3) NOT NULL DEFAULT 0,
+  price NUMERIC(12,2) NOT NULL DEFAULT 0,
+  UNIQUE (product_id, item_id)
+);
+CREATE INDEX IF NOT EXISTS idx_cost_product_items_product ON cost_product_items(product_id);
+
+-- Нормы присадки: сколько операций и времени уходит на изделие
+CREATE TABLE IF NOT EXISTS cost_drilling (
+  product_id INTEGER PRIMARY KEY REFERENCES cost_products(id) ON DELETE CASCADE,
+  confirmats INTEGER, eccentrics INTEGER, screws INTEGER, shelf_holders INTEGER,
+  handles INTEGER, hinges INTEGER, groove NUMERIC(8,2),
+  parts INTEGER, area NUMERIC(8,2), seconds INTEGER,
+  load_factor NUMERIC(6,3), extra_seconds INTEGER,
+  pay_per_item NUMERIC(10,2), total NUMERIC(10,2)
+);
+
+-- Связь товара Kaspi с изделием: по ней и себестоимость видна по заказам,
+-- и код изделия попадает на этикетку коробки
+ALTER TABLE products ADD COLUMN IF NOT EXISTS cost_product_id INTEGER
+  REFERENCES cost_products(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_products_cost_product ON products(cost_product_id);
+
 -- Стартовый набор колонок доски - только если пользователь ещё ничего не заводил
 INSERT INTO crm_statuses (name, color, position)
 SELECT * FROM (VALUES

@@ -15,6 +15,8 @@ type Alias = { storeName: string; sku: string };
 type Item = {
   id: string;
   code: string;
+  /** Внутренний код изделия из себестоимости: SH-4001 */
+  costCode: string | null;
   name: string;
   imageUrl: string | null;
   boxesPerUnit: number;
@@ -300,7 +302,13 @@ function LabelCard({ item, label }: { item: Item; label: Label }) {
         {item.name}
       </div>
 
-      <div style={{ fontSize: '3.4mm', fontFamily: 'monospace' }}>{item.code}</div>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: '2mm', fontFamily: 'monospace' }}>
+        {/* Код изделия из себестоимости крупнее артикула Kaspi: на складе узнают изделие по нему */}
+        {item.costCode && (
+          <span style={{ fontSize: '5mm', fontWeight: 800, letterSpacing: '0.3mm' }}>{item.costCode}</span>
+        )}
+        <span style={{ fontSize: '3.4mm' }}>{item.code}</span>
+      </div>
 
       {item.imageUrl && (
         // eslint-disable-next-line @next/next/no-img-element

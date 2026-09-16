@@ -8,6 +8,7 @@ import TopBar from './components/TopBar';
 import ShippingView from './components/ShippingView';
 import CrmBoard from './components/CrmBoard';
 import ArchiveView from './components/ArchiveView';
+import CostingView from './components/CostingView';
 
 const EMPTY_FILTERS = { product: '', dateFrom: '', dateTo: '', createdPreset: 'all' };
 
@@ -32,7 +33,7 @@ function createdRange(preset) {
 
 // Заказы и накладные - для владельца и менеджера. Упаковщик, кладовщик или рабочий цеха
 // входит той же учёткой, но здесь ему делать нечего, поэтому сразу уводим на склад.
-const OFFICE_ROLES = ['ADMIN', 'MANAGER'];
+const OFFICE_ROLES = ['ADMIN', 'MANAGER', 'TECHNOLOGIST'];
 
 export default function Home() {
   const [user, setUser] = useState(null);
@@ -88,13 +89,21 @@ function Workspace({ onLogout }) {
 
   // Роль решает, показывать ли настройки: правила упаковки, статусы воронки, доступы
   const [me, setMe] = useState(null);
-  const isAdmin = me?.role !== 'manager';
+  const isAdmin = me?.role === 'admin';
+  // Технолог заходит только за себестоимостью - заказы и CRM ему не показываем
+  const isTechnologist = me?.role === 'technologist';
+  const canCosting = isAdmin || isTechnologist;
 
   // Режим запоминаем: человек, работающий в CRM, не должен каждое утро переключаться вручную
   useEffect(() => {
     const saved = window.localStorage.getItem('kaspi:mode');
-    if (['shipping', 'crm', 'archive'].includes(saved)) setMode(saved);
+    if (['shipping', 'crm', 'archive', 'costing'].includes(saved)) setMode(saved);
   }, []);
+
+  // Технологу открыта только себестоимость - что бы ни осталось в памяти браузера
+  useEffect(() => {
+    if (isTechnologist) setMode('costing');
+  }, [isTechnologist]);
 
   const changeMode = (next) => {
     setMode(next);
@@ -169,12 +178,16 @@ function Workspace({ onLogout }) {
         onSync={runSync}
         onLogout={onLogout}
         isAdmin={isAdmin}
+        canCosting={canCosting}
+        isTechnologist={isTechnologist}
       />
 
       <div className="shell">
         {error && <div className="alert alert-error">{error}</div>}
 
-        {mode === 'archive' ? (
+        {mode === 'costing' && canCosting ? (
+          <CostingView isAdmin={isAdmin} />
+        ) : mode === 'archive' ? (
           <ArchiveView />
         ) : mode === 'shipping' ? (
           <ShippingView
