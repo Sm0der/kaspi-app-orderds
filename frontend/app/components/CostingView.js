@@ -48,7 +48,10 @@ export default function CostingView({ isAdmin }) {
     setNotice(null);
     try {
       const { data } = await api.post('/api/costing/import');
-      setNotice(`Перенесено изделий: ${data.products} (с кодом — ${data.withCode}), строк спецификаций: ${data.lines}, новых позиций в справочнике: ${data.items}`);
+      setNotice({
+        text: `Перенесено изделий: ${data.products} (с кодом — ${data.withCode}), строк спецификаций: ${data.lines}, позиций справочника: ${data.items}`,
+        needCode: data.needCode || []
+      });
       await load();
     } catch (err) {
       setError(errorText(err, 'Импорт не удался'));
@@ -101,7 +104,23 @@ export default function CostingView({ isAdmin }) {
       </div>
 
       {error && <div className="alert alert-error">{error}</div>}
-      {notice && <div className="alert alert-ok">{notice}</div>}
+      {notice && (
+        <div className="alert alert-ok">
+          {notice.text}
+          {notice.needCode?.length > 0 && (
+            <div style={{ marginTop: 8 }}>
+              <strong>Без кода — {notice.needCode.length}, проставьте вручную:</strong>
+              <div style={{ display: 'grid', gap: 2, marginTop: 4, fontSize: 13 }}>
+                {notice.needCode.map((p, i) => (
+                  <div key={i}>{p.name} — <span className="t-dim">{p.reason}</span></div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {tab === 'products' && products.length > 0 && <BulkRates onDone={load} />}
 
       {tab === 'items' ? (
         <ItemsCatalog onChanged={load} />
@@ -155,6 +174,70 @@ export default function CostingView({ isAdmin }) {
         ))
       )}
     </>
+  );
+}
+
+// Тарифы работ живут у каждого изделия, но меняются обычно сразу для всех - в таблице
+// они и разошлись из-за того, что править их приходилось в каждом листе.
+const RATES = [
+  { field: 'rate_saw', label: 'Распил, за кв.м' },
+  { field: 'rate_edge', label: 'Кромка, за п.м' },
+  { field: 'rate_pack', label: 'Упаковка, за коробку' },
+  { field: 'rate_ship', label: 'Отправка Kaspi, за коробку' },
+  { field: 'rate_overhead', label: 'Накладные, за коробку' }
+];
+
+function BulkRates({ onDone }) {
+  const [open, setOpen] = useState(false);
+  const [field, setField] = useState('rate_edge');
+  const [value, setValue] = useState('');
+  const [result, setResult] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  const apply = async () => {
+    const price = Number(String(value).replace(',', '.'));
+    if (!(price >= 0)) return;
+    setBusy(true);
+    try {
+      const { data } = await api.put('/api/costing/rates', { field, value: price });
+      setResult(`Готово: тариф изменён у ${data.updated} изделий`);
+      setValue('');
+      onDone();
+    } catch (err) {
+      setResult(errorText(err, 'Не удалось изменить тариф'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!open) {
+    return (
+      <button className="btn btn-quiet btn-sm" style={{ marginBottom: 14 }} onClick={() => setOpen(true)}>
+        Изменить тариф работ во всех изделиях
+      </button>
+    );
+  }
+
+  return (
+    <section className="panel rise" style={{ marginBottom: 18 }}>
+      <div className="panel-body" style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+        <div className="field" style={{ minWidth: 220 }}>
+          <label>Тариф</label>
+          <select className="select" value={field} onChange={(e) => setField(e.target.value)}>
+            {RATES.map(r => <option key={r.field} value={r.field}>{r.label}</option>)}
+          </select>
+        </div>
+        <div className="field" style={{ width: 130 }}>
+          <label>Новое значение</label>
+          <input className="input mono" value={value} onChange={(e) => setValue(e.target.value)} placeholder="20" />
+        </div>
+        <button className="btn btn-primary" onClick={apply} disabled={busy || !value}>
+          {busy && <span className="spinner" />} Применить ко всем
+        </button>
+        <button className="btn btn-quiet" onClick={() => setOpen(false)}>Скрыть</button>
+        {result && <span className="t-dim" style={{ fontSize: 13 }}>{result}</span>}
+      </div>
+    </section>
   );
 }
 

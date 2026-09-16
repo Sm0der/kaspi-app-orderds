@@ -82,7 +82,9 @@ function countsAs(name) {
 
 // SH-4001 → категория SH, 4 двери, 0 ящиков, порядковый 01
 function parseCode(code) {
-  const match = /^([A-Z]{2})-(\d)(\d)(\d{2})$/.exec(String(code || '').trim());
+  // Пятая цифра встречается у исполнений одного изделия (KM-13031 и KM-13032 - комод
+  // Акрос в двух цветах). На разбор она не влияет, но код сохраняем целиком.
+  const match = /^([A-Z]{2})-(\d)(\d)(\d{2})\d?$/.exec(String(code || '').trim());
   if (!match) return null;
   return { category: match[1], doors: +match[2], drawers: +match[3], serialNo: +match[4] };
 }
@@ -99,7 +101,7 @@ async function runImport() {
   if (smetaTab) {
     for (const row of (await fetchSheet(smetaTab.gid)).slice(1)) {
       const code = String(row[1] || '').trim();
-      if (!/^[A-Z]{2}-\d{4}$/.test(code)) continue;
+      if (!/^[A-Z]{2}-\d{4,5}$/.test(code)) continue;
       drillingByName.set(normalize(row[2]), {
         code,
         confirmats: num(row[3]), eccentrics: num(row[4]), screws: num(row[5]),
@@ -111,16 +113,40 @@ async function runImport() {
     }
   }
 
+  // Сопоставляем лист изделия с кодом ОСТОРОЖНО. Нестрогое совпадение по вхождению
+  // подставляет чужие коды: «Комод Берлин Дэй» получил бы код ТВ-тумбы Берлин дэй,
+  // а «Шкаф Монро» - код комода Монро. Поэтому: точное совпадение, иначе единственное
+  // совпадение по началу названия («Комод Венеция» → «Комод Венеция (Белый)»).
+  // Если кандидатов несколько - у изделия в таблице несколько исполнений («Комод Акрос
+  // (Б)», «(ДС)», «(ДС/Б)») - код не угадываем, его проставит технолог.
+  function matchDrilling(title, tabName) {
+    for (const key of [normalize(title), normalize(tabName)]) {
+      if (drillingByName.has(key)) return { drilling: drillingByName.get(key) };
+      const candidates = [...drillingByName.entries()].filter(([name]) => name.startsWith(key));
+      if (candidates.length === 1) return { drilling: candidates[0][1] };
+      if (candidates.length > 1) return { ambiguous: candidates.map(([, d]) => d.code) };
+    }
+    return {};
+  }
+
   const productTabs = tabs.filter(t => !SERVICE_TABS.has(t.name));
-  const report = { products: 0, items: 0, lines: 0, withCode: 0, skipped: [] };
+  const report = { products: 0, items: 0, lines: 0, withCode: 0, skipped: [], needCode: [] };
 
   for (const tab of productTabs) {
     const rows = await fetchSheet(tab.gid);
     const title = String(rows[0]?.[0] || tab.name).trim();
     if (!title) { report.skipped.push(tab.name); continue; }
 
-    const drilling = drillingByName.get(normalize(title)) || drillingByName.get(normalize(tab.name));
+    const match = matchDrilling(title, tab.name);
+    const drilling = match.drilling || null;
     const parsedCode = drilling ? parseCode(drilling.code) : null;
+    if (!drilling) {
+      report.needCode.push({
+        name: title,
+        // Технологу важно знать, почему кода нет: его вовсе нет в смете или исполнений несколько
+        reason: match.ambiguous ? `несколько исполнений: ${match.ambiguous.join(', ')}` : 'нет в СметеПрисадки'
+      });
+    }
 
     // Тарифы работ подписаны в хвосте листа, у каждого изделия свои
     const tailValue = (re) => {
@@ -135,39 +161,56 @@ async function runImport() {
     // берём значение из листа только если оно есть, иначе ставим 20
     const rateEdge = tailValue(/^Стоимость работ по кромкооблицовке/i);
 
-    const saved = await db.query(
-      `INSERT INTO cost_products (code, name, category, doors, drawers, serial_no,
-         rate_saw, rate_edge, rate_pack, rate_ship, rate_overhead, drilling_cost, source_tab, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,
-               COALESCE($7,100), COALESCE($8,20), COALESCE($9,650), COALESCE($10,350),
-               COALESCE($11,2000), COALESCE($12,0), $13, NOW())
-       ON CONFLICT (code) DO UPDATE SET
-         name = EXCLUDED.name, category = EXCLUDED.category, doors = EXCLUDED.doors,
-         drawers = EXCLUDED.drawers, serial_no = EXCLUDED.serial_no,
-         rate_saw = EXCLUDED.rate_saw, rate_edge = EXCLUDED.rate_edge,
-         rate_pack = EXCLUDED.rate_pack, rate_ship = EXCLUDED.rate_ship,
-         rate_overhead = EXCLUDED.rate_overhead, drilling_cost = EXCLUDED.drilling_cost,
-         source_tab = EXCLUDED.source_tab, updated_at = NOW()
-       RETURNING id`,
-      [
-        drilling?.code || null, title, parsedCode?.category || null,
-        parsedCode?.doors ?? null, parsedCode?.drawers ?? null, parsedCode?.serialNo ?? null,
-        rateSaw, rateEdge, ratePack, rateShip, rateOverhead, drilling?.total ?? 0, tab.name
-      ]
-    );
-
-    // Изделие без кода (в СметеПрисадки его ещё нет) вставить по ON CONFLICT (code) нельзя -
-    // заводим по названию, чтобы оно не потерялось и технолог дописал код в сервисе
-    let productId = saved.rows[0]?.id;
-    if (!productId) {
-      const byName = await db.query('SELECT id FROM cost_products WHERE name = $1', [title]);
-      productId = byName.rows[0]?.id
-        || (await db.query(
-             'INSERT INTO cost_products (name, source_tab) VALUES ($1,$2) RETURNING id',
-             [title, tab.name]
-           )).rows[0].id;
+    // Изделие узнаём по ЛИСТУ, а не по названию: в таблице нашёлся лист «ТВТумбаВенеция2»
+    // с заголовком «ТВ Тумба Милан Дэй» - лист скопировали и не переименовали. Привязка по
+    // названию затёрла бы одно изделие другим молча.
+    //
+    // Код ставим, только если он свободен: тот же скопированный лист претендует на чужой код.
+    let code = drilling?.code || null;
+    if (code) {
+      const taken = await db.query(
+        'SELECT source_tab FROM cost_products WHERE code = $1 AND source_tab IS DISTINCT FROM $2',
+        [code, tab.name]
+      );
+      if (taken.rows.length > 0) {
+        report.needCode.push({
+          name: title,
+          reason: `код ${code} уже у листа «${taken.rows[0].source_tab}» — проверьте заголовок листа «${tab.name}»`
+        });
+        code = null;
+      }
     }
-    if (drilling) report.withCode++;
+
+    const existing = await db.query('SELECT id FROM cost_products WHERE source_tab = $1', [tab.name]);
+    const values = [
+      code, title, code ? parsedCode?.category ?? null : null,
+      code ? parsedCode?.doors ?? null : null, code ? parsedCode?.drawers ?? null : null,
+      code ? parsedCode?.serialNo ?? null : null,
+      rateSaw ?? 100, rateEdge ?? 20, ratePack ?? 650, rateShip ?? 350, rateOverhead ?? 2000,
+      drilling?.total ?? 0, tab.name
+    ];
+
+    let productId;
+    if (existing.rows.length > 0) {
+      productId = existing.rows[0].id;
+      await db.query(
+        `UPDATE cost_products SET code = $1, name = $2, category = $3, doors = $4, drawers = $5,
+           serial_no = $6, rate_saw = $7, rate_edge = $8, rate_pack = $9, rate_ship = $10,
+           rate_overhead = $11, drilling_cost = $12, source_tab = $13, updated_at = NOW()
+         WHERE id = $14`,
+        [...values, productId]
+      );
+    } else {
+      const inserted = await db.query(
+        `INSERT INTO cost_products (code, name, category, doors, drawers, serial_no,
+           rate_saw, rate_edge, rate_pack, rate_ship, rate_overhead, drilling_cost, source_tab, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13, NOW()) RETURNING id`,
+        values
+      );
+      productId = inserted.rows[0].id;
+    }
+
+    if (code) report.withCode++;
     report.products++;
 
     if (drilling) {

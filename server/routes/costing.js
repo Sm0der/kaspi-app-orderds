@@ -107,12 +107,13 @@ router.put('/products/:id', async (req, res, next) => {
     const { name, code, rate_saw, rate_edge, rate_pack, rate_ship, rate_overhead,
             drilling_cost, margin_divisor, margin_rate, kaspi_markup } = req.body;
 
-    // Код разбираем на составляющие здесь же: SH-4001 - шкаф, 4 двери, 0 ящиков, номер 01
+    // Код разбираем на составляющие здесь же: SH-4001 - шкаф, 4 двери, 0 ящиков, номер 01.
+    // Пятая цифра - исполнение одного изделия (KM-13031, KM-13032): на разбор не влияет.
     let parts = { category: null, doors: null, drawers: null, serial_no: null };
     if (code) {
-      const match = /^([A-Z]{2})-(\d)(\d)(\d{2})$/.exec(String(code).trim().toUpperCase());
+      const match = /^([A-Z]{2})-(\d)(\d)(\d{2})\d?$/.exec(String(code).trim().toUpperCase());
       if (!match) {
-        return res.status(400).json({ error: 'Код в формате SH-4001: две буквы категории, двери, ящики, номер' });
+        return res.status(400).json({ error: 'Код в формате SH-4001: две буквы категории, двери, ящики, номер (и цифра исполнения, если оно не одно)' });
       }
       parts = { category: match[1], doors: +match[2], drawers: +match[3], serial_no: +match[4] };
     }
@@ -231,6 +232,29 @@ router.put('/items/:id/price', async (req, res, next) => {
       `UPDATE cost_product_items SET price = $2 WHERE ${where}`, params
     );
     await db.query('UPDATE cost_items SET default_price = $2 WHERE id = $1', [req.params.id, price]);
+    res.json({ ok: true, updated: rowCount });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// PUT /api/costing/rates - поставить тариф работ сразу всем изделиям.
+// Тарифы в листах разошлись (кромка 15 у 63 изделий и 20 у 11, притом весь ПРАЙС
+// посчитан по 20), и править их по одному - та же работа, от которой уходим.
+const RATE_FIELDS = ['rate_saw', 'rate_edge', 'rate_pack', 'rate_ship', 'rate_overhead',
+                     'margin_divisor', 'margin_rate', 'kaspi_markup'];
+
+router.put('/rates', async (req, res, next) => {
+  try {
+    const { field } = req.body;
+    const value = Number(req.body.value);
+    if (!RATE_FIELDS.includes(field)) return res.status(400).json({ error: 'Неизвестный тариф' });
+    if (!(value >= 0)) return res.status(400).json({ error: 'Значение - число от 0' });
+
+    const { rowCount } = await db.query(
+      `UPDATE cost_products SET ${field} = $1, updated_at = NOW() WHERE ${field} IS DISTINCT FROM $1`,
+      [value]
+    );
     res.json({ ok: true, updated: rowCount });
   } catch (error) {
     next(error);
