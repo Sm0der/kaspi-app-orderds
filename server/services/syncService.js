@@ -242,6 +242,14 @@ class SyncService {
         for (const row of upserted.rows) idByKaspiId.set(row.kaspi_order_id, row.id);
       }
 
+      // Запоминаем плановую дату отгрузки такой, какой увидели её впервые. Условие
+      // IS NULL и делает её неизменной: у заказа, который уже был в базе, колонка занята,
+      // и перенос срока в Kaspi её не затрёт. Отдельным запросом, а не в UPSERT, чтобы не
+      // гонять одно и то же значение вторым параметром в каждой из сотен строк пачки.
+      await db.query(
+        'UPDATE orders SET ship_date_first = ship_date WHERE ship_date_first IS NULL AND ship_date IS NOT NULL'
+      );
+
       // Состав заказа в Kaspi не меняется после оформления, поэтому запрашиваем его один раз
       // за всю жизнь заказа - только для тех, у кого позиций в БД ещё нет.
       let errorCount = 0;

@@ -8,6 +8,7 @@ const userRoutes = require('./routes/users');
 const batchRoutes = require('./routes/batches');
 const runRoutes = require('./routes/runs');
 const costingRoutes = require('./routes/costing');
+const analyticsRoutes = require('./routes/analytics');
 const pushRoutes = require('./routes/push');
 const requireAuth = require('./middleware/requireAuth');
 const { initDB, query } = require('./db/init');
@@ -93,6 +94,7 @@ app.use('/api/batches', requireAuth, batchRoutes);
 app.use('/api/runs', requireAuth, runRoutes);
 // Себестоимость изделий - внутри роутера доступ сужен до технолога и владельца
 app.use('/api/costing', requireAuth, costingRoutes);
+app.use('/api/analytics', requireAuth, analyticsRoutes);
 app.use('/api/push', pushRoutes);
 
 // GET /api/stores - Список магазинов для переключателя

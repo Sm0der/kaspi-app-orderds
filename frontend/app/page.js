@@ -9,6 +9,7 @@ import ShippingView from './components/ShippingView';
 import CrmBoard from './components/CrmBoard';
 import ArchiveView from './components/ArchiveView';
 import CostingView from './components/CostingView';
+import AnalyticsView from './components/AnalyticsView';
 
 const EMPTY_FILTERS = { product: '', dateFrom: '', dateTo: '', createdPreset: 'all' };
 
@@ -97,7 +98,7 @@ function Workspace({ onLogout }) {
   // Режим запоминаем: человек, работающий в CRM, не должен каждое утро переключаться вручную
   useEffect(() => {
     const saved = window.localStorage.getItem('kaspi:mode');
-    if (['shipping', 'crm', 'archive', 'costing'].includes(saved)) setMode(saved);
+    if (['shipping', 'crm', 'archive', 'costing', 'analytics'].includes(saved)) setMode(saved);
   }, []);
 
   // Технологу открыта только себестоимость - что бы ни осталось в памяти браузера
@@ -187,6 +188,8 @@ function Workspace({ onLogout }) {
 
         {mode === 'costing' && canCosting ? (
           <CostingView isAdmin={isAdmin} />
+        ) : mode === 'analytics' && isAdmin ? (
+          <AnalyticsView storeId={storeId} />
         ) : mode === 'archive' ? (
           <ArchiveView />
         ) : mode === 'shipping' ? (

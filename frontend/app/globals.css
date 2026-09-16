@@ -719,11 +719,81 @@ table.data tbody tr:last-child td { border-bottom: 0; }
 .mark-img { width: 30px; height: 30px; object-fit: contain; }
 .brand .mark-img { width: 21px; height: 21px; }
 
+/* ── Аналитика ───────────────────────────────────────────────────────────── */
+
+.ta-r { text-align: right; }
+
+/* Таблицы отчёта шире телефона, а колонок не сократить - это и есть содержимое.
+   Прокручиваем тело панели, чтобы вбок ездила таблица, а не вся страница. */
+.analytics .panel-body { overflow-x: auto; }
+
+/* Выручка за год - это 9-10 цифр, и обычным кеглем плитки она переносится на вторую
+   строку, ломая ровный ряд. Денежным плиткам свой размер, перенос запрещён. */
+.kpi-value.kpi-money { font-size: 22px; white-space: nowrap; }
+
+/* Два блока рядом на широком экране, друг под другом на узком. Через grid, а не
+   flex с процентами: колонки тогда сами делятся поровну независимо от длины таблиц. */
+.analytics-row {
+  display: grid;
+  /* min(320px, 100%) вместо 320px: на телефоне контейнер уже минимума, и без min()
+     колонка распирает страницу вместо того, чтобы стать в одну колонку. */
+  grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr));
+  gap: 16px;
+}
+.analytics-row > .panel { margin-bottom: 16px; }
+
+.analytics-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(190px, 100%), 1fr));
+  gap: 14px;
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line-soft);
+}
+.analytics-fact-value { font-size: 21px; font-weight: 600; letter-spacing: -0.02em; }
+.analytics-fact-label { margin-top: 3px; font-size: 12.5px; font-weight: 500; }
+.analytics-fact-hint { margin-top: 3px; font-size: 11.5px; color: var(--text-faint); line-height: 1.45; }
+
+/* Столбчатый график. Высоту задаёт контейнер, а не сами столбики: без неё
+   проценты внутри flex-элементов не от чего считать, и график схлопывается. */
+.bars { display: flex; align-items: flex-end; gap: 3px; }
+.bars-col { flex: 1 1 0; min-width: 0; }
+/* Высота столбика - процент от этой полосы, поэтому подпись дня живёт ПОД ней,
+   а не внутри: иначе стопроцентный столбик выдавливал бы подпись за пределы блока. */
+.bars-slot { height: 148px; display: flex; align-items: flex-end; }
+.bars-bar {
+  width: 100%;
+  background: var(--brass);
+  border-radius: 2px 2px 0 0;
+  opacity: 0.82;
+  transition: opacity 0.12s var(--ease);
+}
+.bars-col:hover .bars-bar { opacity: 1; }
+/* Ось дат - отдельная полоса с абсолютными подписями: подпись шире столбика, и внутри
+   колонки она распирала бы страницу вбок. overflow: hidden обрезает крайние даты по краю
+   графика вместо появления горизонтальной прокрутки у всей страницы. */
+.bars-axis {
+  position: relative;
+  height: 13px;
+  margin-top: 6px;
+  overflow: hidden;
+}
+.bars-axis span {
+  position: absolute;
+  font-size: 10px;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
 /* ── Адаптив ─────────────────────────────────────────────────────────────── */
 
 @media (max-width: 900px) {
   .shell { padding: 0 14px 72px; }
   .topbar { padding: 12px 14px; gap: 12px; flex-wrap: wrap; }
+  /* Разделов стало пять, и на телефоне ряд перестал помещаться - уезжал вбок вместе
+     со всей страницей. Пусть вбок ездит сам переключатель. */
+  .segmented { max-width: 100%; overflow-x: auto; }
+  .segmented button { white-space: nowrap; }
   .kpi-value { font-size: 25px; }
   .column { flex-basis: 268px; }
 }

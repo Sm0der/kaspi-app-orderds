@@ -145,6 +145,13 @@ CREATE INDEX IF NOT EXISTS idx_orders_order_date ON orders(order_date);
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS ship_date DATE;
 CREATE INDEX IF NOT EXISTS idx_orders_ship_date ON orders(ship_date);
 
+-- Первая плановая дата передачи курьеру, какой мы её увидели. Kaspi переписывает
+-- courierTransmissionPlanningDate под фактическую передачу - у всех 1690 отгруженных
+-- заказов план и факт совпадали день в день, то есть по данным Kaspi перенос срока
+-- вообще не наблюдаем. Запоминаем дату сами при первой встрече заказа и больше её не
+-- трогаем: расхождение с текущей ship_date и есть перенос (см. routes/analytics.js).
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS ship_date_first DATE;
+
 -- Момент формирования накладной - Kaspi хранит его только внутри PDF (/CreationDate),
 -- читает services/waybillStamps.js. Именно timestamptz: значение пишется из Node, а в
 -- колонке без пояса node-pg толкует время по поясу процесса (локально Алматы, на Vercel
