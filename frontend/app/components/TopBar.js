@@ -72,6 +72,11 @@ export default function TopBar({
             Аналитика
           </button>
         )}
+        {isAdmin && (
+          <button data-active={mode === 'settings'} onClick={() => onModeChange('settings')}>
+            Настройки
+          </button>
+        )}
       </div>
 
       <button className="btn" onClick={onSync} disabled={syncing} title="Забрать свежие данные из Kaspi">

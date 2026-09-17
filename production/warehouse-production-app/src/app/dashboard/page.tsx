@@ -52,6 +52,12 @@ const TILES: { title: string; description: string; href: string; area: Area; ext
     area: 'productionStats',
   },
   {
+    title: 'Изделия склада',
+    description: 'Каталог изделий, коды, привязка артикулов Kaspi',
+    href: '/admin/items',
+    area: 'admin',
+  },
+  {
     title: 'Учётные записи',
     description: 'Сотрудники, роли, пароли',
     href: '/admin/users',

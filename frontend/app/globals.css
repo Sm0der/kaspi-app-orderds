@@ -723,6 +723,16 @@ table.data tbody tr:last-child td { border-bottom: 0; }
 
 .ta-r { text-align: right; }
 
+/* Значение-кнопка в таблицах настроек: выглядит как обычный текст, пока не наведёшь,
+   клик превращает ячейку в поле ввода (см. EditableText в AdminView.js). */
+.btn-link {
+  background: none; border: 0; padding: 0; cursor: pointer; text-align: inherit;
+  font-size: inherit; color: inherit; text-decoration: underline dotted;
+  text-underline-offset: 3px; text-decoration-color: var(--line-strong);
+}
+.btn-link:hover { color: var(--brass-strong); text-decoration-color: var(--brass-strong); }
+.btn-link:disabled { cursor: default; opacity: 0.6; }
+
 /* Таблицы отчёта шире телефона, а колонок не сократить - это и есть содержимое.
    Прокручиваем тело панели, чтобы вбок ездила таблица, а не вся страница. */
 .analytics .panel-body { overflow-x: auto; }
