@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { guard } from '@/lib/guard';
+import { syncProductCostLinks } from '@/lib/costLink';
 import { ApiResponse } from '@/types';
 
 type Params = { params: Promise<{ id: string; skuId: string }> };
@@ -34,11 +35,17 @@ export async function POST(request: NextRequest, { params }: Params) {
 
     const created = await prisma.$transaction(async (tx) => {
       const newItem = await tx.warehouseItem.create({
-        data: { code: link.sku, name, warehouseId: source.warehouseId },
+        // Коробки наследуем у исходного изделия: отцепляют обычно похожую позицию,
+        // и 1 коробка по умолчанию чаще неверна, чем унаследованное значение
+        data: { code: link.sku, name, warehouseId: source.warehouseId, boxesPerUnit: source.boxesPerUnit },
       });
       await tx.warehouseItemSku.update({ where: { id: link.id }, data: { warehouseItemId: newItem.id } });
       return newItem;
     });
+
+    // У нового изделия кода технолога ещё нет - снимаем его и с артикула,
+    // иначе маржа считалась бы по себестоимости изделия, от которого он отцеплен
+    await syncProductCostLinks(created.id);
 
     return NextResponse.json({ success: true, data: created } as ApiResponse<unknown>, { status: 201 });
   } catch (error) {

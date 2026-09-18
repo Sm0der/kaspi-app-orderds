@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { guard } from '@/lib/guard';
+import { syncProductCostLinks } from '@/lib/costLink';
 import { ApiResponse } from '@/types';
 
 type Params = { params: Promise<{ id: string }> };
@@ -55,6 +56,9 @@ export async function PATCH(request: NextRequest, { params }: Params) {
 
     data.updatedAt = new Date();
     const item = await prisma.warehouseItem.update({ where: { id }, data });
+    // Код технолога проставлен на изделии - разложим его по артикулам, иначе маржа
+    // в «Аналитике» считается по products.cost_product_id и осталась бы пустой
+    if (body.costProductId !== undefined) await syncProductCostLinks(id);
     return NextResponse.json({ success: true, data: item } as ApiResponse<unknown>);
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError) {

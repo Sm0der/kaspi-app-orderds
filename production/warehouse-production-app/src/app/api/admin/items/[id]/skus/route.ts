@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { guard } from '@/lib/guard';
+import { syncProductCostLinks } from '@/lib/costLink';
 import { ApiResponse } from '@/types';
 
 type Params = { params: Promise<{ id: string }> };
@@ -27,6 +28,10 @@ export async function POST(request: NextRequest, { params }: Params) {
       data: { warehouseItemId: id, storeId, sku },
       include: { store: true },
     });
+
+    // Новый артикул наследует код технолога изделия - иначе маржа по нему в «Аналитике»
+    // не посчиталась бы (она читает products.cost_product_id)
+    await syncProductCostLinks(id);
 
     return NextResponse.json(
       { success: true, data: { id: link.id, sku: link.sku, storeId: link.storeId, storeName: link.store.name } } as ApiResponse<unknown>,

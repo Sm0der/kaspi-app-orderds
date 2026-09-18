@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { guard } from '@/lib/guard';
+import { syncProductCostLinks } from '@/lib/costLink';
 import { ApiResponse } from '@/types';
 
 type Params = { params: Promise<{ id: string }> };
@@ -46,6 +47,9 @@ export async function POST(request: NextRequest, { params }: Params) {
       }),
       prisma.warehouseItem.delete({ where: { id } }),
     ]);
+
+    // Перешедшие артикулы получают код технолога целевого изделия (для маржи в «Аналитике»)
+    await syncProductCostLinks(intoId);
 
     return NextResponse.json({ success: true, data: { id: intoId } } as ApiResponse<unknown>);
   } catch (error) {

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { guard } from '@/lib/guard';
+import { clearProductCostLink } from '@/lib/costLink';
 import { ApiResponse } from '@/types';
 
 type Params = { params: Promise<{ id: string; skuId: string }> };
@@ -20,6 +21,9 @@ export async function DELETE(request: NextRequest, { params }: Params) {
     }
 
     await prisma.warehouseItemSku.delete({ where: { id: Number(skuId) } });
+    // Артикул больше не этого изделия - снимаем с него и код технолога, иначе маржа
+    // в «Аналитике» продолжила бы считаться по чужой себестоимости
+    await clearProductCostLink(link.storeId, link.sku);
     return NextResponse.json({ success: true, data: { id: Number(skuId) } } as ApiResponse<unknown>);
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
