@@ -44,6 +44,11 @@ const money = (v) => (v === null || v === undefined ? '—' : Math.round(Number(
     LEFT JOIN cards c ON c.store_id = p.store_id AND c.sku = p.sku
     ORDER BY p.store_id, p.name`);
 
+  const { rows: merchants } = await db.query(
+    'SELECT kaspi_merchant_uid, name FROM stores WHERE kaspi_merchant_uid IS NOT NULL'
+  );
+  const ourMerchants = new Map(merchants.map((m) => [String(m.kaspi_merchant_uid), m.name]));
+
   const changed = [];
   const same = [];
   const missing = [];
@@ -72,9 +77,26 @@ const money = (v) => (v === null || v === undefined ? '—' : Math.round(Number(
     }
     await sleep(300);
 
-    const ours = offers.find(
-      (offer) => String(offer.merchantId) === String(product.merchant_uid) && String(offer.merchantSku) === String(product.sku)
-    );
+    // Карточка - это один товар, поэтому ищем по ней своё предложение, а не свой артикул:
+    //   1) точное совпадение магазина и артикула - обычный случай;
+    //   2) наш же магазин, но артикул другой - на Kaspi его пересоздали;
+    //   3) второй наш магазин - позицию перенесли между своими юрлицами, а в каталоге
+    //      осталась строка старого: заказов под новым ещё не было, и строку создать некому.
+    let ours =
+      offers.find(
+        (offer) =>
+          String(offer.merchantId) === String(product.merchant_uid) && String(offer.merchantSku) === String(product.sku)
+      ) || offers.find((offer) => String(offer.merchantId) === String(product.merchant_uid));
+
+    let movedTo = null;
+    if (!ours) {
+      const sibling = offers.find((offer) => ourMerchants.has(String(offer.merchantId)));
+      if (sibling) {
+        ours = sibling;
+        movedTo = ourMerchants.get(String(sibling.merchantId));
+      }
+    }
+
     if (!ours || !(Number(ours.price) > 0)) {
       // Карточка жива, продавцов на ней много, а нашего нет: на Kaspi предложение либо
       // снято, либо кончился остаток - в выдаче такие не показываются вовсе.
@@ -87,9 +109,9 @@ const money = (v) => (v === null || v === undefined ? '—' : Math.round(Number(
 
     // Минимум по карточке показываем для справки: видно, где мы дороже рынка.
     // В базу не пишем - это чужая цена, она живёт своей жизнью каждый день.
-    const rivals = offers.filter((offer) => String(offer.merchantId) !== String(product.merchant_uid));
+    const rivals = offers.filter((offer) => !ourMerchants.has(String(offer.merchantId)));
     const best = rivals.length ? Math.min(...rivals.map((offer) => Number(offer.price))) : null;
-    const row = { ...product, newPrice: Number(ours.price), rivals: rivals.length, best };
+    const row = { ...product, newPrice: Number(ours.price), rivals: rivals.length, best, movedTo };
 
     if (Number(product.price) === Number(ours.price)) same.push(row);
     else changed.push(row);
@@ -101,6 +123,7 @@ const money = (v) => (v === null || v === undefined ? '—' : Math.round(Number(
     console.log(
       '  ' + r.name.slice(0, width).padEnd(width + 2) + r.store_name.padEnd(14) +
       (money(r.price) + ' → ' + money(r.newPrice)).padStart(22) +
+      (r.movedTo ? '   продаёт ' + r.movedTo : '') +
       (r.best ? '   у конкурентов от ' + money(r.best) + (r.best < r.newPrice ? ' (мы дороже)' : '') : '')
     );
   }
