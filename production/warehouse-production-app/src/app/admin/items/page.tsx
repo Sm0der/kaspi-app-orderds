@@ -349,6 +349,7 @@ function ItemRow({
           {merging ? (
             <MergeInto
               items={allItems.filter((i) => i.id !== item.id)}
+              itemName={item.name}
               onPick={(intoId) => { setMerging(false); merge(intoId); }}
               onCancel={() => setMerging(false)}
             />
@@ -699,10 +700,12 @@ function CreateCostProduct({
 
 function MergeInto({
   items,
+  itemName,
   onPick,
   onCancel,
 }: {
   items: Item[];
+  itemName: string;
   onPick: (id: string) => void;
   onCancel: () => void;
 }) {
@@ -724,7 +727,16 @@ function MergeInto({
           Отмена
         </button>
       </div>
-      <p className="mt-2 text-xs text-faint">Это изделие исчезнет, все его артикулы и штрихкоды перейдут туда.</p>
+      {/* Объединение удаляет изделие-источник, и его название перестаёт существовать.
+          Незаметно это меняет и надпись на коробке - владелец поймал такое на четырёх
+          изделиях сразу, поэтому предупреждаем прямо в кнопке, а не в подсказке. */}
+      <p className="mt-2 text-xs text-warn">
+        Это изделие исчезнет: артикулы, штрихкоды и остаток перейдут в выбранное, и на коробке будет печататься
+        <b> его</b> название, а не «{itemName}».
+      </p>
+      <p className="mt-1 text-xs text-faint">
+        Если нужно просто общая себестоимость у двух изделий - объединять не надо, привяжите к обоим один код технолога.
+      </p>
       <div className="mt-2 max-h-48 space-y-1 overflow-y-auto">
         {found.map((i) => (
           <button key={i.id} onClick={() => onPick(i.id)} className="block w-full rounded px-2 py-1.5 text-left text-sm hover:bg-surface">
