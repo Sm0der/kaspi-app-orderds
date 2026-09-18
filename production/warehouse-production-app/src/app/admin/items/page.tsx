@@ -528,14 +528,19 @@ function LinkSku({ itemId, onDone, onCancel }: { itemId: string; onDone: () => v
   );
 }
 
+type CostProduct = { id: number; code: string | null; name: string; usedByItemId: string | null; usedByItemName: string | null };
+
 function LinkCostProduct({ onPick, onCancel }: { onPick: (id: number) => void; onCancel: () => void }) {
   const [query, setQuery] = useState('');
-  const [found, setFound] = useState<{ id: number; code: string | null; name: string; usedByItemId: string | null; usedByItemName: string | null }[]>([]);
+  const [found, setFound] = useState<CostProduct[]>([]);
+  // Заведение нового кода: либо с нуля, либо копией найденного (цветовое исполнение -
+  // себестоимость та же, код и артикул свои)
+  const [creating, setCreating] = useState<{ copyFrom: CostProduct | null } | null>(null);
 
   useEffect(() => {
     const timer = setTimeout(async () => {
       try {
-        const data = await apiFetch<typeof found>(`/api/admin/cost-products?q=${encodeURIComponent(query)}`);
+        const data = await apiFetch<CostProduct[]>(`/api/admin/cost-products?q=${encodeURIComponent(query)}`);
         setFound(data);
       } catch {
         setFound([]);
@@ -543,6 +548,16 @@ function LinkCostProduct({ onPick, onCancel }: { onPick: (id: number) => void; o
     }, 250);
     return () => clearTimeout(timer);
   }, [query]);
+
+  if (creating) {
+    return (
+      <CreateCostProduct
+        copyFrom={creating.copyFrom}
+        onCreated={onPick}
+        onCancel={() => setCreating(null)}
+      />
+    );
+  }
 
   return (
     <div className="w-full rounded-lg border border-line bg-raised p-3">
@@ -558,26 +573,127 @@ function LinkCostProduct({ onPick, onCancel }: { onPick: (id: number) => void; o
           Отмена
         </button>
       </div>
+
       {found.length > 0 && (
         <div className="mt-2 max-h-48 space-y-1 overflow-y-auto">
           {found.map((row) => (
-            <button
-              key={row.id}
-              onClick={() => onPick(row.id)}
-              className="block w-full rounded px-2 py-1.5 text-left text-sm hover:bg-surface"
-            >
-              <span className="font-mono text-brass">{row.code || '—'}</span> <span className="text-ink">{row.name}</span>
-              {row.usedByItemId && (
-                <span className="block text-xs text-faint">уже привязан к «{row.usedByItemName}» - переставится сюда</span>
-              )}
-            </button>
+            <div key={row.id} className="flex items-center gap-1">
+              <button
+                onClick={() => onPick(row.id)}
+                className="block flex-1 rounded px-2 py-1.5 text-left text-sm hover:bg-surface"
+              >
+                <span className="font-mono text-brass">{row.code || '—'}</span> <span className="text-ink">{row.name}</span>
+                {row.usedByItemId && (
+                  <span className="block text-xs text-faint">уже привязан к «{row.usedByItemName}» - переставится сюда</span>
+                )}
+              </button>
+              <button
+                onClick={() => setCreating({ copyFrom: row })}
+                className="flex-none rounded border border-line px-2 py-1 text-xs text-muted hover:bg-surface"
+                title="Завести новый код с такой же себестоимостью - для другого цвета того же изделия"
+              >
+                копия
+              </button>
+            </div>
           ))}
         </div>
       )}
+
       {query.trim().length > 1 && found.length === 0 && (
-        <p className="mt-2 text-xs text-faint">Ничего не нашлось. Недостающие коды подгружаются импортом из таблицы технолога.</p>
+        <p className="mt-2 text-xs text-faint">Ничего не нашлось - заведите код сами или подгрузите импортом из таблицы технолога.</p>
       )}
+
+      <button
+        onClick={() => setCreating({ copyFrom: null })}
+        className="mt-2 rounded border border-dashed border-line px-3 py-1 text-xs text-muted hover:bg-surface"
+      >
+        + Новый код технолога
+      </button>
     </div>
+  );
+}
+
+function CreateCostProduct({
+  copyFrom,
+  onCreated,
+  onCancel,
+}: {
+  copyFrom: CostProduct | null;
+  onCreated: (id: number) => void;
+  onCancel: () => void;
+}) {
+  const [code, setCode] = useState('');
+  const [name, setName] = useState(copyFrom ? copyFrom.name : '');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setBusy(true);
+    setError('');
+    try {
+      const created = await apiFetch<{ id: number }>('/api/admin/cost-products', {
+        method: 'POST',
+        body: JSON.stringify({ code, name, copyFromId: copyFrom?.id ?? null }),
+      });
+      onCreated(created.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось создать код');
+      setBusy(false);
+    }
+  };
+
+  return (
+    <form onSubmit={submit} className="w-full rounded-lg border border-line bg-raised p-3">
+      <div className="mb-2 text-sm font-medium text-ink">
+        {copyFrom ? (
+          <>
+            Новый код копией <span className="font-mono text-brass">{copyFrom.code}</span>
+            <span className="block text-xs font-normal text-faint">
+              Спецификация, присадка и тарифы скопируются - себестоимость будет та же, что у «{copyFrom.name}»
+            </span>
+          </>
+        ) : (
+          <>
+            Новый код технолога
+            <span className="block text-xs font-normal text-faint">
+              Себестоимость будет пустой, пока технолог не заполнит спецификацию - маржа по такому коду в
+              «Аналитике» не считается
+            </span>
+          </>
+        )}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          autoFocus
+          value={code}
+          onChange={(e) => setCode(e.target.value)}
+          placeholder="SH-42041"
+          className="w-32 rounded border border-line px-2 py-1 font-mono text-sm"
+          disabled={busy}
+        />
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Название, например Шкаф Лорд сонома"
+          className="min-w-0 flex-1 rounded border border-line px-2 py-1 text-sm"
+          disabled={busy}
+        />
+        <button
+          type="submit"
+          disabled={busy || !code.trim() || !name.trim()}
+          className="rounded bg-brass px-3 py-1 text-sm font-semibold text-on-brass hover:bg-brass-bright disabled:opacity-50"
+        >
+          {busy ? 'Создаём…' : 'Создать и привязать'}
+        </button>
+        <button type="button" onClick={onCancel} className="text-sm text-faint hover:text-ink">
+          Назад
+        </button>
+      </div>
+
+      {error && <div className="mt-2 text-xs text-danger">{error}</div>}
+    </form>
   );
 }
 

@@ -180,7 +180,8 @@ router.get('/overview', async (req, res, next) => {
         byStore: byStore.rows,
       },
       products: products.rows.map((row) => {
-        const linked = row.cost_product_id ? costs.get(row.cost_product_id) : null;
+        const found = row.cost_product_id ? costs.get(row.cost_product_id) : null;
+        const linked = found && found.cost !== null ? found : null;
         return {
           sku: row.sku,
           name: row.name,
@@ -190,7 +191,9 @@ router.get('/overview', async (req, res, next) => {
           // без связи честнее прочерк, чем выручка, выданная за прибыль.
           cost: linked ? linked.cost * row.qty : null,
           profit: linked ? Math.round(Number(row.revenue) - linked.cost * row.qty) : null,
-          costCode: linked ? linked.code : null,
+          // Код показываем, даже если себестоимости по нему пока нет: владельцу видно,
+          // что связь есть и ждёт спецификации, а не что товар вообще не сопоставлен
+          costCode: found ? found.code : null,
         };
       }),
       logistics: {
@@ -224,8 +227,15 @@ async function costPerProduct() {
     byProduct.get(line.product_id).push(line);
   }
 
+  // Изделие без спецификации - это заведённый код, до которого технолог ещё не дошёл.
+  // Формула на пустой спецификации всё равно вернёт тарифы (упаковка, отправка,
+  // накладные - около трёх тысяч), и прибыль вышла бы почти равной выручке. Такой код
+  // честнее считать неизвестной себестоимостью, как и полное отсутствие связи.
   return new Map(
-    products.map((p) => [p.id, { code: p.code, cost: calculate(p, byProduct.get(p.id) || []).cost }])
+    products.map((p) => {
+      const lines = byProduct.get(p.id) || [];
+      return [p.id, { code: p.code, cost: lines.length > 0 ? calculate(p, lines).cost : null }];
+    })
   );
 }
 
