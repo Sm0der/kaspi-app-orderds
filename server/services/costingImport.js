@@ -130,12 +130,28 @@ async function runImport() {
   }
 
   const productTabs = tabs.filter(t => !SERVICE_TABS.has(t.name));
-  const report = { products: 0, items: 0, lines: 0, withCode: 0, skipped: [], needCode: [] };
+  const report = { products: 0, items: 0, lines: 0, withCode: 0, skipped: [], needCode: [], failed: [] };
 
   for (const tab of productTabs) {
+    try {
+      await importTab(tab, drillingByName, matchDrilling, report);
+    } catch (error) {
+      // Один лист не должен уносить весь перенос: в таблице их под восемьдесят, и раньше
+      // единственная неожиданная ячейка («929,5» в целочисленной колонке времени присадки)
+      // обрывала импорт на середине без единой строки отчёта - технолог видел только
+      // «Импорт не удался» и не знал, какой лист чинить.
+      report.failed.push({ name: tab.name, reason: error.message });
+    }
+  }
+
+  return report;
+}
+
+async function importTab(tab, drillingByName, matchDrilling, report) {
+  {
     const rows = await fetchSheet(tab.gid);
     const title = String(rows[0]?.[0] || tab.name).trim();
-    if (!title) { report.skipped.push(tab.name); continue; }
+    if (!title) { report.skipped.push(tab.name); return; }
 
     const match = matchDrilling(title, tab.name);
     const drilling = match.drilling || null;
@@ -169,10 +185,18 @@ async function runImport() {
     let code = drilling?.code || null;
     if (code) {
       const taken = await db.query(
-        'SELECT source_tab FROM cost_products WHERE code = $1 AND source_tab IS DISTINCT FROM $2',
+        'SELECT id, source_tab FROM cost_products WHERE code = $1 AND source_tab IS DISTINCT FROM $2',
         [code, tab.name]
       );
-      if (taken.rows.length > 0) {
+      if (taken.rows.length > 0 && taken.rows[0].source_tab === null) {
+        // Строка без листа - код, заведённый вручную из админ-панели (владелец
+        // связывает изделие склада раньше, чем технолог доберётся до спецификации).
+        // Лист забирает её себе, а не создаёт вторую: иначе получилась бы пара
+        // «код без спецификации» + «спецификация без кода», и маржа не считалась бы
+        // ни по одной из них, а привязка изделия указывала бы на пустую.
+        await db.query('UPDATE cost_products SET source_tab = $1 WHERE id = $2', [tab.name, taken.rows[0].id]);
+        report.adopted = (report.adopted || 0) + 1;
+      } else if (taken.rows.length > 0) {
         report.needCode.push({
           name: title,
           reason: `код ${code} уже у листа «${taken.rows[0].source_tab}» — проверьте заголовок листа «${tab.name}»`
@@ -264,8 +288,6 @@ async function runImport() {
       report.lines++;
     }
   }
-
-  return report;
 }
 
 module.exports = { runImport, parseCode, parseCsv, num };

@@ -252,10 +252,14 @@ CREATE TABLE IF NOT EXISTS cost_drilling (
   product_id INTEGER PRIMARY KEY REFERENCES cost_products(id) ON DELETE CASCADE,
   confirmats INTEGER, eccentrics INTEGER, screws INTEGER, shelf_holders INTEGER,
   handles INTEGER, hinges INTEGER, groove NUMERIC(8,2),
-  parts INTEGER, area NUMERIC(8,2), seconds INTEGER,
-  load_factor NUMERIC(6,3), extra_seconds INTEGER,
+  parts INTEGER, area NUMERIC(8,2), seconds NUMERIC(10,2),
+  load_factor NUMERIC(6,3), extra_seconds NUMERIC(10,2),
   pay_per_item NUMERIC(10,2), total NUMERIC(10,2)
 );
+-- Время присадки технолог считает с половинами (929,5 секунды у шкафа LUX и ещё у
+-- пятнадцати изделий), а колонки были целыми - импорт падал на первой такой ячейке
+ALTER TABLE cost_drilling ALTER COLUMN seconds TYPE NUMERIC(10,2);
+ALTER TABLE cost_drilling ALTER COLUMN extra_seconds TYPE NUMERIC(10,2);
 
 -- Связь товара Kaspi с изделием: по ней и себестоимость видна по заказам,
 -- и код изделия попадает на этикетку коробки
