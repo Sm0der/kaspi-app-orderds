@@ -3,9 +3,9 @@ import { prisma } from '@/lib/prisma';
 import { guard } from '@/lib/guard';
 import { ApiResponse } from '@/types';
 
-// Список изделий для печати этикеток. Вместе с каждым - все его названия на Kaspi:
-// именно они и путают упаковщика («шкаф Monaco» и «шкаф Alico» - одно и то же изделие),
-// поэтому и в поиске по этой странице, и на самой этикетке они должны быть видны.
+// Список изделий для печати этикеток. Названия на Kaspi нужны только для поиска на
+// этой странице (упаковщик приходит с тем именем, что написано в заказе) - на саму
+// этикетку они больше не попадают, см. LabelCard в warehouse/labels/page.tsx.
 export async function GET(request: NextRequest) {
   try {
     const auth = await guard(request, 'labels');
@@ -17,16 +17,13 @@ export async function GET(request: NextRequest) {
       orderBy: { name: 'asc' },
     });
 
-    // Внутренний код изделия из себестоимости (SH-4001: шкаф, 4 двери, 0 ящиков, номер 01).
-    // Технолог ведёт его в своём разделе, а на складе по нему узнают изделие быстрее,
-    // чем по названию с Kaspi - те у одного и того же шкафа разные в каждом магазине.
-    // Таблицы себестоимости ведёт сервис заказов, у Prisma их в схеме нет - отсюда сырой запрос.
-    const costCodes = await prisma.$queryRaw<{ sku: string; code: string }[]>`
-      SELECT p.sku, cp.code
-      FROM products p
-      JOIN cost_products cp ON cp.id = p.cost_product_id
-      WHERE cp.code IS NOT NULL`;
-    const codeBySku = new Map(costCodes.map((row) => [row.sku, row.code]));
+    // Код технолога (SH-4001: шкаф, 4 двери, 0 ящиков, номер 01) привязан к изделию
+    // напрямую (warehouse_items.cost_product_id), а не через артикул Kaspi - один и тот
+    // же шкаф продаётся под разными артикулами и ценами, код у него один. Таблицу
+    // технолога ведёт сервис заказов, у Prisma склада её в схеме нет - отсюда сырой запрос.
+    const costProducts = await prisma.$queryRaw<{ id: number; code: string | null }[]>`
+      SELECT id, code FROM cost_products`;
+    const codeById = new Map(costProducts.map((row) => [row.id, row.code]));
 
     return NextResponse.json(
       {
@@ -34,7 +31,7 @@ export async function GET(request: NextRequest) {
         data: items.map((item) => ({
           id: item.id,
           code: item.code,
-          costCode: item.skus.map((link) => codeBySku.get(link.sku)).find(Boolean) || null,
+          costCode: item.costProductId ? codeById.get(item.costProductId) ?? null : null,
           name: item.name,
           imageUrl: item.imageUrl,
           boxesPerUnit: item.boxesPerUnit,

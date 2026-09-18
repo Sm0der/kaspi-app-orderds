@@ -45,6 +45,11 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       if (!(quantityOnHand >= 0)) return bad('Остаток не может быть отрицательным');
       data.quantityOnHand = quantityOnHand;
     }
+    // Код технолога - ручная привязка владельцем, без подсказок (см. план сопоставления).
+    // null снимает код обратно.
+    if (body.costProductId !== undefined) {
+      data.costProductId = body.costProductId === null ? null : Number(body.costProductId);
+    }
 
     if (Object.keys(data).length === 0) return bad('Нечего менять');
 
@@ -55,6 +60,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     if (error instanceof Prisma.PrismaClientKnownRequestError) {
       if (error.code === 'P2002') return bad('Изделие с таким кодом уже есть');
       if (error.code === 'P2025') return bad('Изделие не найдено');
+      if (error.code === 'P2003') return bad('Такого кода технолога не существует');
     }
     console.error('Update warehouse item error:', error);
     return NextResponse.json(

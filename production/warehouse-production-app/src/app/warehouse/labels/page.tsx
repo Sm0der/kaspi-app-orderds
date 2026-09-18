@@ -5,10 +5,12 @@ import { useRouter } from 'next/navigation';
 import { apiUrl } from '@/lib/session';
 import JsBarcode from 'jsbarcode';
 
-// Печать этикеток на коробки. Смысл страницы: у изделия одно имя, а на Kaspi оно
-// продаётся под несколькими («шкаф Monaco» и «шкаф Alico» - одно и то же), поэтому
-// упаковщик не может опознать коробку. На этикетку выносим ОБА: крупно внутреннее
-// имя и фото, мелко - все названия с Kaspi, чтобы совпало с любым заказом.
+// Печать этикеток на коробки. У изделия одно имя, а на Kaspi оно продаётся под
+// несколькими («шкаф Monaco» и «шкаф Alico» - одно и то же), поэтому названия и
+// артикулы Kaspi здесь только помогают упаковщику НАЙТИ изделие в поиске. На саму
+// этикетку они не попадают - только внутреннее имя, фото и наш код технолога:
+// один шкаф продаётся под разными артикулами и ценами, и артикул на коробке
+// выдал бы это покупателю.
 
 type Alias = { storeName: string; sku: string };
 
@@ -26,7 +28,9 @@ type Item = {
 
 type Label = { barcodeValue: string; boxNumber: number; boxesTotal: number };
 
-type Sheet = { item: Item; labels: Label[] };
+type PrintedItem = { id: string; costCode: string | null; name: string; imageUrl: string | null; boxesPerUnit: number };
+
+type Sheet = { item: PrintedItem; labels: Label[] };
 
 export default function LabelsPage() {
   const router = useRouter();
@@ -156,9 +160,12 @@ export default function LabelsPage() {
             ) : (
               <>
                 <p className="font-semibold mb-1">{selected.name}</p>
-                <p className="text-sm text-muted mb-4">
-                  На Kaspi: {selected.aliases.map((a) => `${a.sku} (${a.storeName})`).join(', ') || '—'}
-                </p>
+                {!selected.costCode && (
+                  <p className="mb-4 rounded border border-danger bg-danger/10 p-2 text-sm text-danger">
+                    У изделия нет кода технолога - привяжите его в «Изделиях склада», иначе штрихкод уйдёт без
+                    внутреннего кода.
+                  </p>
+                )}
 
                 <input
                   type="number"
@@ -244,7 +251,7 @@ function LabelSheet({ sheet }: { sheet: Sheet }) {
   );
 }
 
-function LabelCard({ item, label }: { item: Item; label: Label }) {
+function LabelCard({ item, label }: { item: PrintedItem; label: Label }) {
   const svgRef = useRef<SVGSVGElement>(null);
 
   useEffect(() => {
@@ -302,13 +309,13 @@ function LabelCard({ item, label }: { item: Item; label: Label }) {
         {item.name}
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: '2mm', fontFamily: 'monospace' }}>
-        {/* Код изделия из себестоимости крупнее артикула Kaspi: на складе узнают изделие по нему */}
-        {item.costCode && (
-          <span style={{ fontSize: '5mm', fontWeight: 800, letterSpacing: '0.3mm' }}>{item.costCode}</span>
-        )}
-        <span style={{ fontSize: '3.4mm' }}>{item.code}</span>
-      </div>
+      {/* Только наш код технолога - без артикула Kaspi: один и тот же шкаф продаётся под
+          разными артикулами и ценами, и артикул на коробке выдал бы это покупателю */}
+      {item.costCode && (
+        <div style={{ fontFamily: 'monospace', fontSize: '5mm', fontWeight: 800, letterSpacing: '0.3mm' }}>
+          {item.costCode}
+        </div>
+      )}
 
       {item.imageUrl && (
         // eslint-disable-next-line @next/next/no-img-element
@@ -346,13 +353,6 @@ function LabelCard({ item, label }: { item: Item; label: Label }) {
           на всю ширину этикетки. */}
       <div style={{ marginTop: 'auto', padding: '0 5mm', boxSizing: 'border-box' }}>
         <svg ref={svgRef} style={{ width: '100%', height: '18mm', display: 'block' }} />
-      </div>
-
-      {/* Названия с Kaspi мелким шрифтом: в заказе может стоять любое из них,
-          и упаковщик должен найти совпадение прямо на коробке */}
-      <div style={{ fontSize: '2.7mm', lineHeight: 1.25, borderTop: '0.3mm solid #000', paddingTop: '1mm' }}>
-        <strong>На Kaspi:</strong>{' '}
-        {item.aliases.map((alias) => `${alias.sku} · ${alias.storeName}`).join(' | ') || '—'}
       </div>
     </div>
   );

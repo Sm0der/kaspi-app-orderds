@@ -10,7 +10,6 @@ interface Sku {
   sku: string;
   storeId: number;
   storeName: string;
-  costCode: string | null;
 }
 
 interface Item {
@@ -22,6 +21,9 @@ interface Item {
   quantityOnHand: number;
   warehouseId: string | null;
   warehouseName: string | null;
+  costProductId: number | null;
+  costCode: string | null;
+  costName: string | null;
   skus: Sku[];
 }
 
@@ -45,6 +47,7 @@ function ItemsScreen() {
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState(false);
   const [q, setQ] = useState('');
+  const [onlyWithoutCode, setOnlyWithoutCode] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -64,14 +67,15 @@ function ItemsScreen() {
   }, [load]);
 
   const query = q.trim().toLowerCase();
-  const filtered = query
-    ? items.filter(
-        (item) =>
-          item.name.toLowerCase().includes(query) ||
-          item.code.toLowerCase().includes(query) ||
-          item.skus.some((s) => s.sku.toLowerCase().includes(query))
-      )
-    : items;
+  const filtered = items
+    .filter((item) => !onlyWithoutCode || !item.costProductId)
+    .filter(
+      (item) =>
+        !query ||
+        item.name.toLowerCase().includes(query) ||
+        item.code.toLowerCase().includes(query) ||
+        item.skus.some((s) => s.sku.toLowerCase().includes(query))
+    );
 
   return (
     <div className="min-h-screen">
@@ -93,12 +97,18 @@ function ItemsScreen() {
         )}
 
         <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Поиск по названию, коду или артикулу"
-            className="w-full max-w-xs rounded-lg border border-line px-3 py-2 text-sm sm:w-auto"
-          />
+          <div className="flex flex-wrap items-center gap-3">
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Поиск по названию, коду или артикулу"
+              className="w-full max-w-xs rounded-lg border border-line px-3 py-2 text-sm sm:w-auto"
+            />
+            <label className="flex items-center gap-1.5 text-sm text-muted">
+              <input type="checkbox" checked={onlyWithoutCode} onChange={(e) => setOnlyWithoutCode(e.target.checked)} />
+              без кода технолога
+            </label>
+          </div>
           <button
             onClick={() => setAdding((value) => !value)}
             className="rounded-lg bg-brass px-4 py-2 font-semibold text-on-brass hover:bg-brass-bright"
@@ -124,7 +134,7 @@ function ItemsScreen() {
         ) : (
           <div className="space-y-3">
             {filtered.map((item) => (
-              <ItemRow key={item.id} item={item} warehouses={warehouses} onChanged={load} />
+              <ItemRow key={item.id} item={item} warehouses={warehouses} allItems={items} onChanged={load} />
             ))}
           </div>
         )}
@@ -133,10 +143,22 @@ function ItemsScreen() {
   );
 }
 
-function ItemRow({ item, warehouses, onChanged }: { item: Item; warehouses: Warehouse[]; onChanged: () => void }) {
+function ItemRow({
+  item,
+  warehouses,
+  allItems,
+  onChanged,
+}: {
+  item: Item;
+  warehouses: Warehouse[];
+  allItems: Item[];
+  onChanged: () => void;
+}) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [linking, setLinking] = useState(false);
+  const [linkingCode, setLinkingCode] = useState(false);
+  const [merging, setMerging] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   const patch = async (body: Record<string, unknown>) => {
@@ -173,6 +195,31 @@ function ItemRow({ item, warehouses, onChanged }: { item: Item; warehouses: Ware
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось отвязать');
     } finally {
+      setBusy(false);
+    }
+  };
+
+  const split = async (skuId: number) => {
+    setBusy(true);
+    setError('');
+    try {
+      await apiFetch(`/api/admin/items/${item.id}/skus/${skuId}/split`, { method: 'POST' });
+      onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось отцепить');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const merge = async (intoId: string) => {
+    setBusy(true);
+    setError('');
+    try {
+      await apiFetch(`/api/admin/items/${item.id}/merge`, { method: 'POST', body: JSON.stringify({ intoId }) });
+      onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось объединить');
       setBusy(false);
     }
   };
@@ -223,12 +270,56 @@ function ItemRow({ item, warehouses, onChanged }: { item: Item; warehouses: Ware
             </select>
           </div>
 
+          {/* Код технолога - якорь на изделии, не на артикуле: один физический шкаф
+              продаётся под разными артикулами и ценами, а код у него один. Привязка
+              только вручную, без подсказок. */}
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
+            <span className="text-faint">Код технолога:</span>
+            {item.costCode ? (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-brass/15 px-3 py-1 font-mono text-xs text-brass">
+                {item.costCode}
+                <span className="font-sans text-faint">{item.costName}</span>
+                <button
+                  onClick={() => patch({ costProductId: null })}
+                  disabled={busy}
+                  className="text-faint hover:text-danger"
+                  title="Отвязать код"
+                >
+                  ×
+                </button>
+              </span>
+            ) : linkingCode ? (
+              <LinkCostProduct
+                onPick={(id) => {
+                  setLinkingCode(false);
+                  patch({ costProductId: id });
+                }}
+                onCancel={() => setLinkingCode(false)}
+              />
+            ) : (
+              <button
+                onClick={() => setLinkingCode(true)}
+                disabled={busy}
+                className="rounded-full border border-dashed border-line px-3 py-1 text-xs text-muted hover:bg-raised"
+              >
+                + привязать код
+              </button>
+            )}
+          </div>
+
           <div className="mt-3 flex flex-wrap gap-2">
             {item.skus.map((s) => (
               <span key={s.id} className="inline-flex items-center gap-1.5 rounded-full bg-raised px-3 py-1 text-xs">
                 <span className="font-medium text-ink">{s.storeName}</span>
                 <span className="text-muted">{s.sku}</span>
-                {s.costCode && <span className="text-brass">{s.costCode}</span>}
+                <button
+                  onClick={() => split(s.id)}
+                  disabled={busy}
+                  className="text-faint hover:text-ink"
+                  title="Отцепить в новое изделие - если это на самом деле другой физический шкаф"
+                >
+                  ⇥
+                </button>
                 <button onClick={() => unlink(s.id)} disabled={busy} className="text-faint hover:text-danger" title="Отвязать">
                   ×
                 </button>
@@ -246,27 +337,46 @@ function ItemRow({ item, warehouses, onChanged }: { item: Item; warehouses: Ware
           {error && <div className="mt-2 text-xs text-danger">{error}</div>}
         </div>
 
-        {confirmingDelete ? (
-          <div className="flex flex-none flex-col gap-1 text-xs">
-            <span className="text-muted">Удалить изделие?</span>
-            <div className="flex gap-2">
-              <button onClick={remove} disabled={busy} className="rounded border border-danger px-2 py-1 text-danger hover:bg-danger/10">
-                Да
-              </button>
-              <button onClick={() => setConfirmingDelete(false)} className="rounded border border-line px-2 py-1">
-                Нет
-              </button>
+        <div className="flex flex-none flex-col items-end gap-2">
+          {merging ? (
+            <MergeInto
+              items={allItems.filter((i) => i.id !== item.id)}
+              onPick={(intoId) => { setMerging(false); merge(intoId); }}
+              onCancel={() => setMerging(false)}
+            />
+          ) : (
+            <button
+              onClick={() => setMerging(true)}
+              disabled={busy}
+              className="rounded border border-line px-3 py-1 text-sm text-muted hover:bg-raised"
+              title="Одно и то же изделие завели дважды - слить в одно"
+            >
+              Объединить с…
+            </button>
+          )}
+
+          {confirmingDelete ? (
+            <div className="flex flex-col gap-1 text-xs">
+              <span className="text-muted">Удалить изделие?</span>
+              <div className="flex gap-2">
+                <button onClick={remove} disabled={busy} className="rounded border border-danger px-2 py-1 text-danger hover:bg-danger/10">
+                  Да
+                </button>
+                <button onClick={() => setConfirmingDelete(false)} className="rounded border border-line px-2 py-1">
+                  Нет
+                </button>
+              </div>
             </div>
-          </div>
-        ) : (
-          <button
-            onClick={() => setConfirmingDelete(true)}
-            disabled={busy}
-            className="flex-none rounded border border-line px-3 py-1 text-sm text-muted hover:bg-raised"
-          >
-            Удалить
-          </button>
-        )}
+          ) : (
+            <button
+              onClick={() => setConfirmingDelete(true)}
+              disabled={busy}
+              className="rounded border border-line px-3 py-1 text-sm text-muted hover:bg-raised"
+            >
+              Удалить
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -399,6 +509,99 @@ function LinkSku({ itemId, onDone, onCancel }: { itemId: string; onDone: () => v
       {query.trim().length > 1 && found.length === 0 && (
         <p className="mt-2 text-xs text-faint">Ничего не нашлось, либо все совпадения уже привязаны</p>
       )}
+    </div>
+  );
+}
+
+function LinkCostProduct({ onPick, onCancel }: { onPick: (id: number) => void; onCancel: () => void }) {
+  const [query, setQuery] = useState('');
+  const [found, setFound] = useState<{ id: number; code: string | null; name: string; usedByItemId: string | null; usedByItemName: string | null }[]>([]);
+
+  useEffect(() => {
+    const timer = setTimeout(async () => {
+      try {
+        const data = await apiFetch<typeof found>(`/api/admin/cost-products?q=${encodeURIComponent(query)}`);
+        setFound(data);
+      } catch {
+        setFound([]);
+      }
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [query]);
+
+  return (
+    <div className="w-full rounded-lg border border-line bg-raised p-3">
+      <div className="flex items-center gap-2">
+        <input
+          autoFocus
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Код (SH-4001) или название у технолога"
+          className="flex-1 rounded border border-line px-2 py-1 text-sm"
+        />
+        <button onClick={onCancel} className="text-sm text-faint hover:text-ink">
+          Отмена
+        </button>
+      </div>
+      {found.length > 0 && (
+        <div className="mt-2 max-h-48 space-y-1 overflow-y-auto">
+          {found.map((row) => (
+            <button
+              key={row.id}
+              onClick={() => onPick(row.id)}
+              className="block w-full rounded px-2 py-1.5 text-left text-sm hover:bg-surface"
+            >
+              <span className="font-mono text-brass">{row.code || '—'}</span> <span className="text-ink">{row.name}</span>
+              {row.usedByItemId && (
+                <span className="block text-xs text-faint">уже привязан к «{row.usedByItemName}» - переставится сюда</span>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+      {query.trim().length > 1 && found.length === 0 && (
+        <p className="mt-2 text-xs text-faint">Ничего не нашлось. Недостающие коды подгружаются импортом из таблицы технолога.</p>
+      )}
+    </div>
+  );
+}
+
+function MergeInto({
+  items,
+  onPick,
+  onCancel,
+}: {
+  items: Item[];
+  onPick: (id: string) => void;
+  onCancel: () => void;
+}) {
+  const [query, setQuery] = useState('');
+  const q = query.trim().toLowerCase();
+  const found = (q ? items.filter((i) => i.name.toLowerCase().includes(q) || i.code.toLowerCase().includes(q)) : items).slice(0, 20);
+
+  return (
+    <div className="w-64 rounded-lg border border-line bg-raised p-3 text-left">
+      <div className="flex items-center gap-2">
+        <input
+          autoFocus
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="В какое изделие объединить"
+          className="flex-1 rounded border border-line px-2 py-1 text-sm"
+        />
+        <button onClick={onCancel} className="text-sm text-faint hover:text-ink">
+          Отмена
+        </button>
+      </div>
+      <p className="mt-2 text-xs text-faint">Это изделие исчезнет, все его артикулы и штрихкоды перейдут туда.</p>
+      <div className="mt-2 max-h-48 space-y-1 overflow-y-auto">
+        {found.map((i) => (
+          <button key={i.id} onClick={() => onPick(i.id)} className="block w-full rounded px-2 py-1.5 text-left text-sm hover:bg-surface">
+            <span className="text-ink">{i.name}</span> <span className="font-mono text-faint">{i.code}</span>
+          </button>
+        ))}
+        {found.length === 0 && <p className="text-xs text-faint">Ничего не нашлось</p>}
+      </div>
     </div>
   );
 }

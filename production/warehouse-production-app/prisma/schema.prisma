@@ -231,6 +231,10 @@ model WarehouseItem {
   imageUrl       String?  @map("image_url")
   /// Сколько коробок в одной штуке: на каждую печатается своя этикетка «N из M»
   boxesPerUnit   Int      @default(1) @map("boxes_per_unit")
+  /// Код технолога (cost_products.id из базы дашборда заказов - своей таблицы там нет,
+  /// поэтому только числовой id без Prisma-связи). Якорь - изделие склада, а не артикул
+  /// Kaspi: под одной физической коробкой бывает несколько артикулов сразу.
+  costProductId  Int?     @map("cost_product_id")
   createdAt      DateTime @default(now()) @map("created_at")
   updatedAt      DateTime @default(now()) @map("updated_at")
 

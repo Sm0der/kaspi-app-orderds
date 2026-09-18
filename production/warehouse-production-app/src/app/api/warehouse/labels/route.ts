@@ -30,10 +30,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const item = await prisma.warehouseItem.findUnique({
-      where: { id: warehouseItemId },
-      include: { skus: { include: { store: true } } },
-    });
+    const item = await prisma.warehouseItem.findUnique({ where: { id: warehouseItemId } });
 
     if (!item) {
       return NextResponse.json(
@@ -41,6 +38,17 @@ export async function POST(request: NextRequest) {
         { status: 404 }
       );
     }
+
+    // Код технолога, а не item.code: у большинства изделий item.code исторически
+    // равен артикулу Kaspi, и печатать его под штрихкодом - тот же слив маркетингового
+    // трюка покупателю, от которого владелец и просил избавиться на этикетке.
+    let costCode: string | null = null;
+    if (item.costProductId) {
+      const rows = await prisma.$queryRaw<{ code: string | null }[]>`
+        SELECT code FROM cost_products WHERE id = ${item.costProductId}`;
+      costCode = rows[0]?.code ?? null;
+    }
+    const barcodeBase = costCode || item.id.slice(0, 8).toUpperCase();
 
     const batch = await prisma.labelBatch.create({
       data: { warehouseItemId: item.id, units: count, printedBy: payload.userId },
@@ -53,7 +61,7 @@ export async function POST(request: NextRequest) {
     for (let i = 0; i < count; i++) {
       let created = false;
       for (let attempt = 0; attempt < 5 && !created; attempt++) {
-        const value = makeBarcodeValue(item.code);
+        const value = makeBarcodeValue(barcodeBase);
         try {
           await prisma.barcode.create({
             data: {
@@ -90,11 +98,10 @@ export async function POST(request: NextRequest) {
           batchId: batch.id,
           item: {
             id: item.id,
-            code: item.code,
+            costCode,
             name: item.name,
             imageUrl: item.imageUrl,
             boxesPerUnit: item.boxesPerUnit,
-            aliases: item.skus.map((link) => ({ storeName: link.store.name, sku: link.sku })),
           },
           // По этикетке на каждую коробку каждой штуки
           labels: values.flatMap((value) =>

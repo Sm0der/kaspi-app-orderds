@@ -17,14 +17,13 @@ export async function GET(request: NextRequest) {
     orderBy: { name: 'asc' },
   });
 
-  // Код себестоимости - как и в списке для этикеток (labels/items/route.ts): своя таблица
-  // технолога живёт в базе заказов, у Prisma склада её в схеме нет, поэтому сырой запрос.
-  const costCodes = await prisma.$queryRaw<{ sku: string; code: string }[]>`
-    SELECT p.sku, cp.code
-    FROM products p
-    JOIN cost_products cp ON cp.id = p.cost_product_id
-    WHERE cp.code IS NOT NULL`;
-  const codeBySku = new Map(costCodes.map((row) => [row.sku, row.code]));
+  // Код технолога привязан к ИЗДЕЛИЮ (warehouse_items.cost_product_id), а не к артикулу
+  // Kaspi под ним: одну физическую коробку продают под разными артикулами и ценами
+  // ради маркетинга, а код у неё один. Своя таблица технолога живёт в базе заказов,
+  // у Prisma склада её в схеме нет, поэтому сырой запрос.
+  const costProducts = await prisma.$queryRaw<{ id: number; code: string | null; name: string }[]>`
+    SELECT id, code, name FROM cost_products`;
+  const costById = new Map(costProducts.map((row) => [row.id, row]));
 
   const warehouses = await prisma.warehouse.findMany({ orderBy: { name: 'asc' } });
 
@@ -40,12 +39,14 @@ export async function GET(request: NextRequest) {
         quantityOnHand: item.quantityOnHand,
         warehouseId: item.warehouseId,
         warehouseName: item.warehouse?.name ?? null,
+        costProductId: item.costProductId,
+        costCode: item.costProductId ? costById.get(item.costProductId)?.code ?? null : null,
+        costName: item.costProductId ? costById.get(item.costProductId)?.name ?? null : null,
         skus: item.skus.map((link) => ({
           id: link.id,
           sku: link.sku,
           storeId: link.storeId,
           storeName: link.store.name,
-          costCode: codeBySku.get(link.sku) ?? null,
         })),
       })),
       warehouses,
