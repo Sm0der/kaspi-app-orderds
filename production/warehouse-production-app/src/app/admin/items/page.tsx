@@ -413,11 +413,18 @@ function EditableText({
   useEffect(() => setDraft(value), [value]);
 
   if (!editing) {
+    // Число вроде «1» под точечным подчёркиванием почти не читается как кликабельное -
+    // рамка вместо подчёркивания делает это заметно даже для одной цифры
     return (
       <button
         disabled={disabled}
         onClick={() => setEditing(true)}
-        className={`underline decoration-dotted decoration-line underline-offset-2 hover:decoration-brass ${mono ? 'font-mono' : ''} ${className || ''}`}
+        title="Нажмите, чтобы изменить"
+        className={
+          numeric
+            ? `rounded border border-dashed border-line px-1.5 text-ink hover:border-brass ${className || ''}`
+            : `underline decoration-dotted decoration-line underline-offset-2 hover:decoration-brass ${mono ? 'font-mono' : ''} ${className || ''}`
+        }
       >
         {value}
       </button>
