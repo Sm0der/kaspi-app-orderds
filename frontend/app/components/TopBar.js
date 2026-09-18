@@ -74,7 +74,7 @@ export default function TopBar({
         )}
         {isAdmin && (
           <button data-active={mode === 'settings'} onClick={() => onModeChange('settings')}>
-            Настройки
+            Админ-панель
           </button>
         )}
       </div>
@@ -98,12 +98,6 @@ export default function TopBar({
       <a className="btn btn-quiet" href="/sklad/dashboard" title="Этикетки, приёмка, отгрузка">
         Склад
       </a>
-
-      {isAdmin && (
-        <a className="btn btn-quiet btn-icon" href="/sklad/admin/users" title="Сотрудники и доступы">
-          <span aria-hidden="true">⚙</span>
-        </a>
-      )}
 
       <button className="btn btn-quiet btn-icon" onClick={onLogout} title="Выйти">
         <span aria-hidden="true">⏻</span>

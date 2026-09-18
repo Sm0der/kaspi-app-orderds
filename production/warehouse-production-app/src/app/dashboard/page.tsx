@@ -58,6 +58,12 @@ const TILES: { title: string; description: string; href: string; area: Area; ext
     area: 'admin',
   },
   {
+    title: 'Склады и цехи',
+    description: 'Места хранения и очередь цехов производства',
+    href: '/admin/warehouses',
+    area: 'admin',
+  },
+  {
     title: 'Учётные записи',
     description: 'Сотрудники, роли, пароли',
     href: '/admin/users',

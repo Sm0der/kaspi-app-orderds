@@ -10,7 +10,7 @@ import CrmBoard from './components/CrmBoard';
 import ArchiveView from './components/ArchiveView';
 import CostingView from './components/CostingView';
 import AnalyticsView from './components/AnalyticsView';
-import AdminView from './components/AdminView';
+import AdminPanel from './components/AdminPanel';
 
 const EMPTY_FILTERS = { product: '', dateFrom: '', dateTo: '', createdPreset: 'all' };
 
@@ -192,7 +192,7 @@ function Workspace({ onLogout }) {
         ) : mode === 'analytics' && isAdmin ? (
           <AnalyticsView storeId={storeId} />
         ) : mode === 'settings' && isAdmin ? (
-          <AdminView />
+          <AdminPanel isAdmin={isAdmin} />
         ) : mode === 'archive' ? (
           <ArchiveView />
         ) : mode === 'shipping' ? (

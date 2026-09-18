@@ -48,6 +48,12 @@ function ItemsScreen() {
   const [adding, setAdding] = useState(false);
   const [q, setQ] = useState('');
   const [onlyWithoutCode, setOnlyWithoutCode] = useState(false);
+  // embed=1 - страница встроена внутрь единой админ-панели дашборда заказов
+  // (frontend/app/components/AdminPanel.js): своя шапка там лишняя, общая уже есть.
+  const [embed, setEmbed] = useState(false);
+  useEffect(() => {
+    setEmbed(new URLSearchParams(window.location.search).get('embed') === '1');
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -79,17 +85,19 @@ function ItemsScreen() {
 
   return (
     <div className="min-h-screen">
-      <nav className="sticky top-0 z-40 border-b border-line bg-[var(--topbar-bg)] backdrop-blur-md">
-        <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-4">
-          <div>
-            <h1 className="text-xl font-bold text-ink">Изделия склада</h1>
-            <p className="text-sm text-faint">Что печатают на этикетках и сканируют на приёмке</p>
+      {!embed && (
+        <nav className="sticky top-0 z-40 border-b border-line bg-[var(--topbar-bg)] backdrop-blur-md">
+          <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-4">
+            <div>
+              <h1 className="text-xl font-bold text-ink">Изделия склада</h1>
+              <p className="text-sm text-faint">Что печатают на этикетках и сканируют на приёмке</p>
+            </div>
+            <Link href="/dashboard" className="text-sm text-brass hover:underline">
+              ← Ко всем разделам
+            </Link>
           </div>
-          <Link href="/dashboard" className="text-sm text-brass hover:underline">
-            ← Ко всем разделам
-          </Link>
-        </div>
-      </nav>
+        </nav>
+      )}
 
       <main className="mx-auto max-w-5xl px-4 py-8">
         {error && (
