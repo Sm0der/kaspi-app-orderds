@@ -63,12 +63,14 @@ async function searchCards(text, page = 0) {
   });
 }
 
-// Предложения продавцов по карточке: merchantId, merchantSku, цена
-async function cardOffers(cardId) {
+// Предложения продавцов по карточке: merchantId, merchantSku, цена.
+// Отдаётся страницами по 20 и сортируется по цене, поэтому у ходовой модели своё
+// предложение может лежать на второй-третьей странице - вызывающий обходит их сам.
+async function cardOffers(cardId, page = 0) {
   return withRetries(async () => {
     const { data } = await client.post(
       `${OFFERS_URL}/${cardId}`,
-      { cityId: ALMATY_CITY_ID, id: String(cardId), merchantUID: '', limit: 20, page: 0, sort: true, installationId: '-1' },
+      { cityId: ALMATY_CITY_ID, id: String(cardId), merchantUID: '', limit: 20, page, sort: true, installationId: '-1' },
       { headers: { 'Content-Type': 'application/json', Referer: `https://kaspi.kz/shop/p/-${cardId}/` } }
     );
     return data?.offers || [];
