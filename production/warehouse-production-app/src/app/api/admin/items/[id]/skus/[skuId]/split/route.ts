@@ -22,8 +22,8 @@ export async function POST(request: NextRequest, { params }: Params) {
     if (!link || link.warehouseItemId !== id) return bad('Связь не найдена');
 
     const [productRows, source] = await Promise.all([
-      prisma.$queryRawUnsafe<{ name: string }[]>(
-        `SELECT name FROM products WHERE store_id = $1 AND sku = $2 LIMIT 1`,
+      prisma.$queryRawUnsafe<{ name: string; image_url: string | null }[]>(
+        `SELECT name, image_url FROM products WHERE store_id = $1 AND sku = $2 LIMIT 1`,
         link.storeId,
         link.sku
       ),
@@ -36,8 +36,17 @@ export async function POST(request: NextRequest, { params }: Params) {
     const created = await prisma.$transaction(async (tx) => {
       const newItem = await tx.warehouseItem.create({
         // Коробки наследуем у исходного изделия: отцепляют обычно похожую позицию,
-        // и 1 коробка по умолчанию чаще неверна, чем унаследованное значение
-        data: { code: link.sku, name, warehouseId: source.warehouseId, boxesPerUnit: source.boxesPerUnit },
+        // и 1 коробка по умолчанию чаще неверна, чем унаследованное значение.
+        // Фото берём своё - из каталога по этому артикулу, и только если там пусто,
+        // наследуем исходное: у отцепляемой карточки обычно свой цвет, а фото
+        // печатается на этикетке.
+        data: {
+          code: link.sku,
+          name,
+          warehouseId: source.warehouseId,
+          boxesPerUnit: source.boxesPerUnit,
+          imageUrl: productRows[0]?.image_url ?? source.imageUrl,
+        },
       });
       await tx.warehouseItemSku.update({ where: { id: link.id }, data: { warehouseItemId: newItem.id } });
       return newItem;

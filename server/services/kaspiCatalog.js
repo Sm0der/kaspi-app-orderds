@@ -82,4 +82,23 @@ function cardImage(card) {
   return image ? (image.medium || image.large || image.small) : null;
 }
 
-module.exports = { searchCards, cardOffers, cardImage };
+// Картинка по НОМЕРУ карточки, без поиска по названию. Номер приходит в самом заказе
+// (order_items.raw_data.relationships.product.data.id, base64), то есть Kaspi уже сказал,
+// какая карточка соответствует нашему артикулу - гадать по названию не нужно, а это
+// именно то место, где подстановка «похожей» картинки давала чужой цвет изделия.
+// Берём og:image страницы карточки: отдельной ручки для картинки у Kaspi нет.
+async function cardImageById(cardId) {
+  return withRetries(async () => {
+    const { data } = await client.get(`https://kaspi.kz/shop/p/-${cardId}/`, {
+      headers: { Accept: 'text/html,application/xhtml+xml' },
+      responseType: 'text',
+    });
+    const url =
+      data.match(/<meta[^>]+property="og:image"[^>]+content="([^"]+)"/i)?.[1] ||
+      data.match(/<meta[^>]+content="([^"]+)"[^>]+property="og:image"/i)?.[1];
+    // В каталоге у остальных товаров лежит preview-medium - держим один размер
+    return url ? url.replace(/\?format=.*$/, '?format=preview-medium') : null;
+  });
+}
+
+module.exports = { searchCards, cardOffers, cardImage, cardImageById };

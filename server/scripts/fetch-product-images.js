@@ -12,7 +12,7 @@
 // остаётся без картинки и попадает в список в конце.
 require('dotenv').config();
 const db = require('../db/init');
-const { searchCards, cardOffers, cardImage } = require('../services/kaspiCatalog');
+const { searchCards, cardOffers, cardImage, cardImageById } = require('../services/kaspiCatalog');
 
 const APPLY = process.argv.includes('--apply');
 
@@ -59,6 +59,50 @@ async function collectCards(queries) {
   }
 
   let total = 0;
+
+  // Сначала - товары, которые уже продавались: в заказе лежит номер карточки Kaspi
+  // (base64 в relationships.product.data.id), и картинку можно взять прямо с неё, минуя
+  // поиск по названию. Поиск оставлен ниже для новых товаров, по которым заказов ещё нет.
+  const { rows: known } = await db.query(`
+    SELECT o.store_id, oi.sku,
+           (ARRAY_AGG(oi.raw_data->'relationships'->'product'->'data'->>'id'
+                      ORDER BY o.order_date DESC NULLS LAST))[1] AS card_b64
+    FROM order_items oi
+    JOIN orders o ON o.id = oi.order_id
+    WHERE oi.raw_data->'relationships'->'product'->'data'->>'id' IS NOT NULL
+    GROUP BY o.store_id, oi.sku`);
+
+  for (const row of known) {
+    const products = byStore.get(row.store_id);
+    const product = products?.get(String(row.sku));
+    if (!product) continue;
+
+    const cardId = Buffer.from(row.card_b64, 'base64').toString('utf8');
+    let url;
+    try {
+      url = await cardImageById(cardId);
+    } catch (error) {
+      console.log(`  ! карточка ${cardId}: ${error.message}`);
+      continue;
+    }
+    await sleep(250);
+    if (!url) continue;
+
+    console.log(`ПО КАРТОЧКЕ  ${product.sku}  ${product.name.trim().slice(0, 44)}  ->  ${cardId}`);
+    if (APPLY) {
+      await db.query('UPDATE products SET image_url = $1, updated_at = NOW() WHERE store_id = $2 AND sku = $3', [
+        url,
+        row.store_id,
+        product.sku,
+      ]);
+    }
+    products.delete(String(row.sku));
+    total++;
+  }
+
+  for (const [storeId, products] of byStore) {
+    if (products.size === 0) byStore.delete(storeId);
+  }
 
   for (const [storeId, products] of byStore) {
     console.log(`\n=== магазин ${storeId}: ищем ${products.size} артикулов`);
