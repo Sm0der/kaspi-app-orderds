@@ -25,6 +25,14 @@ export async function GET(request: NextRequest) {
       SELECT id, code FROM cost_products`;
     const codeById = new Map(costProducts.map((row) => [row.id, row.code]));
 
+    // Названия товаров с Kaspi - ради поиска на странице печати. Упаковщик приходит с
+    // именем из заказа («Cassini», «Кухни Гранд»), а у изделия имя одно, своё: после
+    // того как несколько карточек свели в одно изделие, найти его по имени из заказа
+    // стало нельзя. На саму этикетку эти названия не попадают.
+    const catalog = await prisma.$queryRaw<{ store_id: number; sku: string; name: string }[]>`
+      SELECT store_id, sku, name FROM products`;
+    const nameBySku = new Map(catalog.map((row) => [`${row.store_id}|${row.sku}`, row.name]));
+
     return NextResponse.json(
       {
         success: true,
@@ -39,6 +47,7 @@ export async function GET(request: NextRequest) {
           aliases: item.skus.map((link) => ({
             storeName: link.store.name,
             sku: link.sku,
+            name: nameBySku.get(`${link.storeId}|${link.sku}`) ?? null,
           })),
         })),
       } as ApiResponse<any>,

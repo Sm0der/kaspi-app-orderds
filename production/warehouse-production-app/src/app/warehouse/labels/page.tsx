@@ -12,7 +12,7 @@ import JsBarcode from 'jsbarcode';
 // один шкаф продаётся под разными артикулами и ценами, и артикул на коробке
 // выдал бы это покупателю.
 
-type Alias = { storeName: string; sku: string };
+type Alias = { storeName: string; sku: string; name: string | null };
 
 type Item = {
   id: string;
@@ -67,7 +67,11 @@ export default function LabelsPage() {
         (item) =>
           item.name.toLowerCase().includes(needle) ||
           item.code.toLowerCase().includes(needle) ||
-          item.aliases.some((alias) => alias.sku.toLowerCase().includes(needle))
+          item.aliases.some(
+            (alias) =>
+              alias.sku.toLowerCase().includes(needle) ||
+              (alias.name || '').toLowerCase().includes(needle)
+          )
       )
       .slice(0, 40);
   }, [items, query]);
