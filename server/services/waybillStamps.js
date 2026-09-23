@@ -82,7 +82,7 @@ async function refreshStamps(syncService, { limit = DEFAULT_LIMIT } = {}) {
         const response = await axios.get(url, {
           responseType: 'arraybuffer',
           timeout: 20000,
-          headers: { 'X-Auth-Token': store.service.apiToken }
+          headers: store.service.authHeaders()
         });
         const pdf = Buffer.from(response.data);
         const madeAt = parseCreationDate(pdf);

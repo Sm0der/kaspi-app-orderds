@@ -69,9 +69,9 @@ class SyncService {
     this.services = {}; // { storeId: KaspiService }
   }
 
-  addStore(storeId, apiToken, storeName) {
+  addStore(storeId, apiToken, storeName, merchantUid) {
     this.services[storeId] = {
-      service: new KaspiService(apiToken),
+      service: new KaspiService(apiToken, merchantUid),
       name: storeName,
       lastSync: null
     };

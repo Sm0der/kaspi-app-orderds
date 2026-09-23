@@ -213,7 +213,7 @@ async function fetchWaybills(orders, syncService) {
         const pdf = await axios.get(url, {
           responseType: 'arraybuffer',
           timeout: 20000,
-          headers: { 'X-Auth-Token': store.service.apiToken }
+          headers: store.service.authHeaders()
         });
         results[index] = { ...base, pdf: Buffer.from(pdf.data) };
       } catch (error) {

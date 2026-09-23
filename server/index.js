@@ -39,9 +39,11 @@ async function initialize() {
 
   syncService = new SyncService();
 
-  const storesResult = await query('SELECT id, name, api_token FROM stores WHERE api_token IS NOT NULL');
+  const storesResult = await query(
+    'SELECT id, name, api_token, kaspi_merchant_uid FROM stores WHERE api_token IS NOT NULL'
+  );
   for (const store of storesResult.rows) {
-    syncService.addStore(store.id, store.api_token, store.name);
+    syncService.addStore(store.id, store.api_token, store.name, store.kaspi_merchant_uid);
     console.log(`✓ Store loaded: ${store.name} (ID: ${store.id})`);
   }
 

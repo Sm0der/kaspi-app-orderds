@@ -6,15 +6,34 @@ const RETRY_DELAY = 1000;
 const MAX_RETRIES = 3;
 
 class KaspiService {
-  constructor(apiToken) {
+  // merchantUid - номер магазина на Kaspi (stores.kaspi_merchant_uid). Поддержка Kaspi
+  // 23.09.2026 в ответ на разбор отказов ARRIVED («404 Order not found» по существующим
+  // заказам) попросила слать его заголовком X-Merchant-Uid во ВСЕХ запросах: по нему они
+  // определяют, от имени какого магазина обрабатывать запрос. Токен у нас свой на каждый
+  // магазин, но одного токена им, видимо, мало. Без uid заголовок просто не ставим -
+  // так работало до сих пор.
+  constructor(apiToken, merchantUid) {
     this.apiToken = apiToken;
+    this.merchantUid = merchantUid || null;
     this.client = axios.create({
       baseURL: KASPI_API_BASE,
       headers: {
         'Content-Type': 'application/vnd.api+json',
-        'X-Auth-Token': apiToken
+        'X-Auth-Token': apiToken,
+        ...(merchantUid ? { 'X-Merchant-Uid': String(merchantUid) } : {})
       }
     });
+  }
+
+  // Заголовки для запросов в обход этого клиента - накладные качаются напрямую через
+  // axios, потому что это PDF, а не JSON:API (routes/runs.js, routes/batches.js,
+  // services/waybillStamps.js). Чтобы правило «слать X-Merchant-Uid везде» жило в одном
+  // месте, состав заголовков они берут отсюда, а не собирают руками.
+  authHeaders() {
+    return {
+      'X-Auth-Token': this.apiToken,
+      ...(this.merchantUid ? { 'X-Merchant-Uid': String(this.merchantUid) } : {})
+    };
   }
 
   // Выполнить GET с повторными попытками при 429 (лимит запросов) и 5xx.
