@@ -161,7 +161,12 @@ function ProductRow({ product, onSave }) {
           disabled={busy}
           placeholder="—"
           numeric
-          onSave={(v) => commit({ price: v === '' ? null : Number(v) })}
+          onSave={(v) => {
+            // Поле текстовое: "12o000" даёт NaN, а тот молча сериализуется в null -
+            // цена стёрлась бы без единого сообщения об ошибке
+            if (v !== '' && Number.isNaN(Number(v))) return;
+            commit({ price: v === '' ? null : Number(v) });
+          }}
         />
       </td>
       <td className="ta-r">

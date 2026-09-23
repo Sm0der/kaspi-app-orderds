@@ -113,9 +113,12 @@ function Workspace({ onLogout }) {
   };
 
   useEffect(() => {
+    // На сбой (сеть, 5xx, а то и честный 403 от requireAuth) отвечаем ролью БЕЗ прав,
+    // а не 'admin' - иначе временная ошибка сети показывала бы обычному менеджеру
+    // кнопки «Аналитика» и «Админ-панель» до следующей удачной загрузки страницы.
     api.get('/api/users/me')
       .then(({ data }) => setMe(data))
-      .catch(() => setMe({ role: 'admin' }));
+      .catch(() => setMe({ role: null }));
 
     api.get('/api/stores')
       .then(({ data }) => setStores(data.data || []))
