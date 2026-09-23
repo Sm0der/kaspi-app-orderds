@@ -25,34 +25,46 @@ export async function POST(request: NextRequest, { params }: Params) {
     if (!intoId) return bad('Укажите, в какое изделие объединять');
     if (intoId === id) return bad('Нельзя объединить изделие само с собой');
 
-    const [source, target] = await Promise.all([
-      prisma.warehouseItem.findUnique({ where: { id } }),
-      prisma.warehouseItem.findUnique({ where: { id: intoId } }),
-    ]);
-    if (!source) return bad('Изделие не найдено');
-    if (!target) return bad('Целевое изделие не найдено');
+    // Остаток и код технолога читаем ВНУТРИ транзакции, а не заранее: если ровно в этот
+    // момент кладовщик печатает новые этикетки на исходное изделие (это тоже прибавляет
+    // quantityOnHand), значение, прочитанное до транзакции, устареет, и приращение уйдёт
+    // в никуда - штрихкоды переедут в целевое изделие, а посчитанные по ним штуки нет.
+    await prisma.$transaction(async (tx) => {
+      const [source, target] = await Promise.all([
+        tx.warehouseItem.findUnique({ where: { id } }),
+        tx.warehouseItem.findUnique({ where: { id: intoId } }),
+      ]);
+      if (!source) throw new Error('SOURCE_NOT_FOUND');
+      if (!target) throw new Error('TARGET_NOT_FOUND');
 
-    await prisma.$transaction([
-      prisma.warehouseItemSku.updateMany({ where: { warehouseItemId: id }, data: { warehouseItemId: intoId } }),
-      prisma.barcode.updateMany({ where: { warehouseItemId: id }, data: { warehouseItemId: intoId } }),
-      prisma.labelBatch.updateMany({ where: { warehouseItemId: id }, data: { warehouseItemId: intoId } }),
-      prisma.productionItem.updateMany({ where: { warehouseItemId: id }, data: { warehouseItemId: intoId } }),
-      prisma.warehouseItem.update({
+      await tx.warehouseItemSku.updateMany({ where: { warehouseItemId: id }, data: { warehouseItemId: intoId } });
+      await tx.barcode.updateMany({ where: { warehouseItemId: id }, data: { warehouseItemId: intoId } });
+      await tx.labelBatch.updateMany({ where: { warehouseItemId: id }, data: { warehouseItemId: intoId } });
+      await tx.productionItem.updateMany({ where: { warehouseItemId: id }, data: { warehouseItemId: intoId } });
+      await tx.warehouseItem.update({
         where: { id: intoId },
         data: {
           quantityOnHand: { increment: source.quantityOnHand },
           costProductId: target.costProductId ?? source.costProductId,
           updatedAt: new Date(),
         },
-      }),
-      prisma.warehouseItem.delete({ where: { id } }),
-    ]);
+      });
+      await tx.warehouseItem.delete({ where: { id } });
+    });
 
-    // Перешедшие артикулы получают код технолога целевого изделия (для маржи в «Аналитике»)
-    await syncProductCostLinks(intoId);
+    // Слияние уже необратимо случилось - если это упадёт, помечаем изделие снаружи как
+    // "код не разложен по артикулам" через 200, а не отвечаем "не удалось объединить":
+    // повторная попытка объединения нашла бы исходное изделие уже удалённым.
+    try {
+      await syncProductCostLinks(intoId);
+    } catch (error) {
+      console.error('Merge succeeded but cost-link sync failed:', error);
+    }
 
     return NextResponse.json({ success: true, data: { id: intoId } } as ApiResponse<unknown>);
   } catch (error) {
+    if (error instanceof Error && error.message === 'SOURCE_NOT_FOUND') return bad('Изделие не найдено');
+    if (error instanceof Error && error.message === 'TARGET_NOT_FOUND') return bad('Целевое изделие не найдено');
     console.error('Merge warehouse items error:', error);
     return NextResponse.json(
       { success: false, error: 'Не удалось объединить изделия' } as ApiResponse<null>,

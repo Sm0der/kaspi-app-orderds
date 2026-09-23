@@ -57,13 +57,24 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     data.updatedAt = new Date();
     const item = await prisma.warehouseItem.update({ where: { id }, data });
     // Код технолога проставлен на изделии - разложим его по артикулам, иначе маржа
-    // в «Аналитике» считается по products.cost_product_id и осталась бы пустой
-    if (body.costProductId !== undefined) await syncProductCostLinks(id);
+    // в «Аналитике» считается по products.cost_product_id и осталась бы пустой.
+    // Изделие уже сохранено - если это упадёт, не отвечаем "не удалось сохранить":
+    // владелец решил бы, что вся правка не применилась, хотя она применилась.
+    if (body.costProductId !== undefined) {
+      try {
+        await syncProductCostLinks(id);
+      } catch (error) {
+        console.error('Item saved but cost-link sync failed:', error);
+      }
+    }
     return NextResponse.json({ success: true, data: item } as ApiResponse<unknown>);
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError) {
       if (error.code === 'P2002') return bad('Изделие с таким кодом уже есть');
-      if (error.code === 'P2025') return bad('Изделие не найдено');
+      // P2025 здесь означает ЛИБО что нет изделия, ЛИБО что connect() не нашёл склад
+      // с таким warehouseId (например, устаревший список в форме) - само изделие
+      // при этом на месте, и "Изделие не найдено" сбило бы с толку
+      if (error.code === 'P2025') return bad('Изделие или выбранный склад не найдены');
       if (error.code === 'P2003') return bad('Такого кода технолога не существует');
     }
     console.error('Update warehouse item error:', error);

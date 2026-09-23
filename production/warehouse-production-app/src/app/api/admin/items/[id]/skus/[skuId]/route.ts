@@ -22,8 +22,13 @@ export async function DELETE(request: NextRequest, { params }: Params) {
 
     await prisma.warehouseItemSku.delete({ where: { id: Number(skuId) } });
     // Артикул больше не этого изделия - снимаем с него и код технолога, иначе маржа
-    // в «Аналитике» продолжила бы считаться по чужой себестоимости
-    await clearProductCostLink(link.storeId, link.sku);
+    // в «Аналитике» продолжила бы считаться по чужой себестоимости. Отвязка уже
+    // случилась - сбой здесь не должен читаться как "артикул не отвязался".
+    try {
+      await clearProductCostLink(link.storeId, link.sku);
+    } catch (error) {
+      console.error('SKU unlinked but cost-link clear failed:', error);
+    }
     return NextResponse.json({ success: true, data: { id: Number(skuId) } } as ApiResponse<unknown>);
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {

@@ -53,8 +53,13 @@ export async function POST(request: NextRequest, { params }: Params) {
     });
 
     // У нового изделия кода технолога ещё нет - снимаем его и с артикула,
-    // иначе маржа считалась бы по себестоимости изделия, от которого он отцеплен
-    await syncProductCostLinks(created.id);
+    // иначе маржа считалась бы по себестоимости изделия, от которого он отцеплен.
+    // Новое изделие уже создано и артикул уже переехал - сбой здесь не отменяет это.
+    try {
+      await syncProductCostLinks(created.id);
+    } catch (error) {
+      console.error('Split succeeded but cost-link sync failed:', error);
+    }
 
     return NextResponse.json({ success: true, data: created } as ApiResponse<unknown>, { status: 201 });
   } catch (error) {

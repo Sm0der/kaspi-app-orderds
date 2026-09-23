@@ -50,52 +50,57 @@ export async function POST(request: NextRequest) {
     }
     const barcodeBase = costCode || item.id.slice(0, 8).toUpperCase();
 
-    const batch = await prisma.labelBatch.create({
-      data: { warehouseItemId: item.id, units: count, printedBy: payload.userId },
-    });
+    // Партия, штрихкоды и приход остатка - одной транзакцией. Раньше это были отдельные
+    // запросы: если один штрихкод из двухсот исчерпывал 5 попыток (коллизия хвоста или
+    // просто сбойнул запрос), функция отвечала 500, а первые полторы сотни barcode-строк
+    // и сама партия уже были закоммичены в базу - живые "в наличии" записи без единой
+    // напечатанной этикетки и без учтённого в quantityOnHand остатка. Транзакция откатывает
+    // всё разом, если хоть один штрихкод так и не удалось выдать.
+    const result = await prisma.$transaction(async (tx) => {
+      const batch = await tx.labelBatch.create({
+        data: { warehouseItemId: item.id, units: count, printedBy: payload.userId },
+      });
 
-    // Значения генерируем со случайным хвостом, а не по счётчику: две печати могут
-    // идти одновременно, и счётчик тогда выдал бы одинаковые коды. Уникальность всё
-    // равно стережёт индекс в базе, поэтому на конфликт просто пробуем ещё раз.
-    const values: string[] = [];
-    for (let i = 0; i < count; i++) {
-      let created = false;
-      for (let attempt = 0; attempt < 5 && !created; attempt++) {
-        const value = makeBarcodeValue(barcodeBase);
-        try {
-          await prisma.barcode.create({
-            data: {
-              barcodeValue: value,
-              warehouseItemId: item.id,
-              status: 'IN_STOCK',
-              batchId: String(batch.id),
-            },
-          });
-          values.push(value);
-          created = true;
-        } catch (error: any) {
-          if (error?.code !== 'P2002') throw error; // не про уникальность - пробрасываем
+      // Значения генерируем со случайным хвостом, а не по счётчику: две печати могут
+      // идти одновременно, и счётчик тогда выдал бы одинаковые коды. Уникальность всё
+      // равно стережёт индекс в базе, поэтому на конфликт просто пробуем ещё раз.
+      const created: string[] = [];
+      for (let i = 0; i < count; i++) {
+        let ok = false;
+        for (let attempt = 0; attempt < 5 && !ok; attempt++) {
+          const value = makeBarcodeValue(barcodeBase);
+          try {
+            await tx.barcode.create({
+              data: {
+                barcodeValue: value,
+                warehouseItemId: item.id,
+                status: 'IN_STOCK',
+                batchId: String(batch.id),
+              },
+            });
+            created.push(value);
+            ok = true;
+          } catch (error: any) {
+            if (error?.code !== 'P2002') throw error; // не про уникальность - пробрасываем
+          }
         }
+        if (!ok) throw new Error('BARCODE_EXHAUSTED');
       }
-      if (!created) {
-        return NextResponse.json(
-          { success: false, error: 'Не удалось выдать уникальные штрихкоды, попробуйте ещё раз' } as ApiResponse<null>,
-          { status: 500 }
-        );
-      }
-    }
 
-    // Печать - это и есть приход на склад: коробки существуют физически с этого момента
-    await prisma.warehouseItem.update({
-      where: { id: item.id },
-      data: { quantityOnHand: { increment: count }, updatedAt: new Date() },
+      // Печать - это и есть приход на склад: коробки существуют физически с этого момента
+      await tx.warehouseItem.update({
+        where: { id: item.id },
+        data: { quantityOnHand: { increment: count }, updatedAt: new Date() },
+      });
+
+      return { batchId: batch.id, values: created };
     });
 
     return NextResponse.json(
       {
         success: true,
         data: {
-          batchId: batch.id,
+          batchId: result.batchId,
           item: {
             id: item.id,
             costCode,
@@ -104,7 +109,7 @@ export async function POST(request: NextRequest) {
             boxesPerUnit: item.boxesPerUnit,
           },
           // По этикетке на каждую коробку каждой штуки
-          labels: values.flatMap((value) =>
+          labels: result.values.flatMap((value) =>
             Array.from({ length: item.boxesPerUnit }, (_, box) => ({
               barcodeValue: value,
               boxNumber: box + 1,
@@ -116,6 +121,12 @@ export async function POST(request: NextRequest) {
       { status: 200 }
     );
   } catch (error) {
+    if (error instanceof Error && error.message === 'BARCODE_EXHAUSTED') {
+      return NextResponse.json(
+        { success: false, error: 'Не удалось выдать уникальные штрихкоды, попробуйте ещё раз' } as ApiResponse<null>,
+        { status: 500 }
+      );
+    }
     console.error('Generate labels error:', error);
     return NextResponse.json(
       { success: false, error: 'Внутренняя ошибка сервера' } as ApiResponse<null>,

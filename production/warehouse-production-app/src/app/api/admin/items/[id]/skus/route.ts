@@ -30,8 +30,13 @@ export async function POST(request: NextRequest, { params }: Params) {
     });
 
     // Новый артикул наследует код технолога изделия - иначе маржа по нему в «Аналитике»
-    // не посчиталась бы (она читает products.cost_product_id)
-    await syncProductCostLinks(id);
+    // не посчиталась бы (она читает products.cost_product_id). Привязка уже сохранена -
+    // сбой здесь не должен выглядеть как "артикул не привязался".
+    try {
+      await syncProductCostLinks(id);
+    } catch (error) {
+      console.error('SKU linked but cost-link sync failed:', error);
+    }
 
     return NextResponse.json(
       { success: true, data: { id: link.id, sku: link.sku, storeId: link.storeId, storeName: link.store.name } } as ApiResponse<unknown>,
