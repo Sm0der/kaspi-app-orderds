@@ -99,7 +99,9 @@ app.use('/api/runs', requireAuth, runRoutes);
 app.use('/api/costing', requireAuth, costingRoutes);
 app.use('/api/analytics', requireAuth, analyticsRoutes);
 app.use('/api/admin', requireAuth, adminRoutes);
-app.use('/api/push', pushRoutes);
+// Без requireAuth сюда мог зайти кто угодно без токена: читать историю уведомлений,
+// слать себе тестовые push и подписывать/отписывать чужие endpoint'ы
+app.use('/api/push', requireAuth, pushRoutes);
 
 // GET /api/stores - Список магазинов для переключателя
 app.get('/api/stores', requireAuth, async (req, res, next) => {

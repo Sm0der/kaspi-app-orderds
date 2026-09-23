@@ -91,6 +91,15 @@ function parseCode(code) {
 
 const normalize = (s) => String(s || '').toLowerCase().replace(/[^а-яёa-z0-9]/gi, '');
 
+// Часть кодов в таблице технолога набрана похожими кириллическими буквами (КМ-0411
+// выглядит как латинское KM-0411, но это другие символы). На вид не отличить, а
+// /^[A-Z]{2}-\d{4,5}$/ такой код молча отбраковывает - изделие остаётся без кода и
+// без стоимости присадки, попадая в отчёт с обманчивой причиной «нет в СметеПрисадки»,
+// хотя код в таблице есть. Та же грабля и то же лечение, что в admin/cost-products
+// приложения склада - приводим похожие буквы к латинице перед проверкой формата.
+const CYRILLIC_LOOKALIKE = { А: 'A', В: 'B', Е: 'E', К: 'K', М: 'M', Н: 'H', О: 'O', Р: 'P', С: 'C', Т: 'T', У: 'Y', Х: 'X' };
+const normalizeCode = (raw) => String(raw || '').trim().toUpperCase().replace(/[А-Я]/g, (ch) => CYRILLIC_LOOKALIKE[ch] ?? ch);
+
 async function runImport() {
   const tabs = await fetchTabs();
   if (tabs.length === 0) throw new Error('Не удалось прочитать список листов таблицы');
@@ -100,7 +109,7 @@ async function runImport() {
   const drillingByName = new Map();
   if (smetaTab) {
     for (const row of (await fetchSheet(smetaTab.gid)).slice(1)) {
-      const code = String(row[1] || '').trim();
+      const code = normalizeCode(row[1]);
       if (!/^[A-Z]{2}-\d{4,5}$/.test(code)) continue;
       drillingByName.set(normalize(row[2]), {
         code,

@@ -267,6 +267,12 @@ ALTER TABLE products ADD COLUMN IF NOT EXISTS cost_product_id INTEGER
   REFERENCES cost_products(id) ON DELETE SET NULL;
 CREATE INDEX IF NOT EXISTS idx_products_cost_product ON products(cost_product_id);
 
+-- Номер магазина на Kaspi. Раньше существовал только в живой базе (заведён вручную
+-- в Supabase), в этом файле - в схеме-как-коде - миграции не было вовсе: пересборка
+-- с нуля (новый Supabase-проект, восстановление после сбоя) осталась бы без колонки,
+-- и initialize() падал бы на первом же SELECT из index.js.
+ALTER TABLE stores ADD COLUMN IF NOT EXISTS kaspi_merchant_uid VARCHAR(20);
+
 -- Стартовый набор колонок доски - только если пользователь ещё ничего не заводил
 INSERT INTO crm_statuses (name, color, position)
 SELECT * FROM (VALUES
