@@ -184,6 +184,25 @@ ALTER TABLE orders ADD COLUMN IF NOT EXISTS crm_status_id INTEGER
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS crm_status_changed_at TIMESTAMP;
 CREATE INDEX IF NOT EXISTS idx_orders_crm_status ON orders(crm_status_id);
 
+-- День создания заказа по Алматы, выведенный из epoch в raw_data. «Аналитика» фильтрует
+-- период именно этим выражением (колонка order_date для этого не годится, см. комментарий
+-- в routes/analytics.js), и пока заказов были тысячи, последовательный перебор проходил
+-- незаметно. После заливки истории за 2025-2026 в таблице 39 тысяч строк, и один такой
+-- запрос стал занимать 4 секунды - а страница аналитики делает их десяток разом.
+-- Индекс по выражению возвращает это к единицам миллисекунд.
+CREATE INDEX IF NOT EXISTS idx_orders_created_day ON orders
+  ((((timestamp 'epoch' + (((raw_data->'attributes'->>'creationDate')::bigint + 18000000) / 1000) * interval '1 second'))::date));
+
+-- Журнал разовых заливок истории (server/scripts/import-kaspi-history.js). Нужен ровно
+-- для отката: по метке партии видно, какие именно заказы добавил тот запуск.
+CREATE TABLE IF NOT EXISTS history_import (
+  batch          TEXT NOT NULL,
+  order_id       INTEGER NOT NULL,
+  kaspi_order_id VARCHAR(100) NOT NULL,
+  imported_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (batch, order_id)
+);
+
 -- Таблицы app_users здесь больше нет: люди и роли всей системы живут в production_users,
 -- которую ведёт приложение склада (production/warehouse-production-app). Две таблицы
 -- пользователей означали два пароля и два места, где выдавать доступ.
