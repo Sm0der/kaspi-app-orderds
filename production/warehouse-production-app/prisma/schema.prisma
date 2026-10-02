@@ -41,7 +41,10 @@ model Order {
   stage        String?   @db.VarChar(20)
   shipDate     DateTime? @map("ship_date") @db.Date
   deliveryDate DateTime? @map("delivery_date") @db.Date
-  createdAt    DateTime? @map("created_at")
+  // Колонки created_at в orders нет - таблицу ведёт синхронизация с Kaspi, у неё свои
+  // synced_at / order_date. Поле в схеме было с самого начала и ломало весь экран
+  // отгрузки: Prisma перечисляет все скалярные поля модели, получала от Postgres
+  // «column orders.created_at does not exist» и роняла запрос с 500.
 
   store              Store               @relation(fields: [storeId], references: [id])
   items              OrderItem[]
