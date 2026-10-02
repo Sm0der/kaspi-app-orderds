@@ -118,6 +118,10 @@ CREATE INDEX IF NOT EXISTS idx_products_name ON products(name);
 CREATE INDEX IF NOT EXISTS idx_orders_store_id ON orders(store_id);
 CREATE INDEX IF NOT EXISTS idx_orders_delivery_date ON orders(delivery_date);
 CREATE INDEX IF NOT EXISTS idx_orders_urgency ON orders(urgency);
+-- Список заказов сортируется по срочности и дате доставки и берёт одну страницу.
+-- По одиночным индексам Postgres для этого сортировал всю таблицу - на 39 тысячах строк
+-- это 10 секунд на запрос; составной отдаёт первые 50 строк сразу.
+CREATE INDEX IF NOT EXISTS idx_orders_urgency_delivery ON orders(urgency, delivery_date);
 CREATE INDEX IF NOT EXISTS idx_orders_stage ON orders(stage);
 CREATE INDEX IF NOT EXISTS idx_order_items_order_id ON order_items(order_id);
 CREATE INDEX IF NOT EXISTS idx_order_items_product_code ON order_items(product_code);
