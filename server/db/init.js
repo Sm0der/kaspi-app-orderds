@@ -193,6 +193,13 @@ CREATE INDEX IF NOT EXISTS idx_orders_crm_status ON orders(crm_status_id);
 CREATE INDEX IF NOT EXISTS idx_orders_created_day ON orders
   ((((timestamp 'epoch' + (((raw_data->'attributes'->>'creationDate')::bigint + 18000000) / 1000) * interval '1 second'))::date));
 
+-- То же для дня передачи курьеру: по нему «Аналитика» строит график отгрузок, и без
+-- индекса этот единственный запрос перебирал всю таблицу, распаковывая jsonb на каждой
+-- строке. Частичный - заказы без передачи курьеру в этот отчёт всё равно не попадают.
+CREATE INDEX IF NOT EXISTS idx_orders_handed_day ON orders
+  ((((timestamp 'epoch' + (((raw_data->'attributes'->'kaspiDelivery'->>'courierTransmissionDate')::bigint + 18000000) / 1000) * interval '1 second'))::date))
+  WHERE raw_data->'attributes'->'kaspiDelivery'->>'courierTransmissionDate' IS NOT NULL;
+
 -- Журнал разовых заливок истории (server/scripts/import-kaspi-history.js). Нужен ровно
 -- для отката: по метке партии видно, какие именно заказы добавил тот запуск.
 CREATE TABLE IF NOT EXISTS history_import (

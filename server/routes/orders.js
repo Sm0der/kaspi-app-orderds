@@ -601,42 +601,55 @@ router.get('/', async (req, res, next) => {
   try {
     const { urgency, stage, storeId, limit = 50, offset = 0 } = req.query;
 
-    let query = `
-      SELECT o.*, s.name as store_name,
-        json_agg(json_build_object(
-          'id', oi.id,
-          'name', oi.name,
-          'quantity', oi.quantity,
-          'sku', oi.sku,
-          'imageUrl', oi.image_url
-        ) ORDER BY oi.sku ASC) as items
+    // Страницу заказов отбираем ДО присоединения позиций. Раньше запрос джойнил
+    // order_items ко всей таблице, группировал её целиком и только потом брал LIMIT 50:
+    // пока заказов были тысячи, это проходило незаметно, а на 39 тысячах строк (после
+    // заливки истории за 2025-2026) один такой запрос занимал 8 секунд. Теперь внутренний
+    // подзапрос отдаёт ровно страницу, и позиции подтягиваются только к ней.
+    let inner = `
+      SELECT o.id
       FROM orders o
-      LEFT JOIN stores s ON o.store_id = s.id
-      LEFT JOIN order_items oi ON o.id = oi.order_id
       WHERE 1=1
     `;
     const params = [];
 
     if (urgency) {
       params.push(urgency);
-      query += ` AND o.urgency = $${params.length}`;
+      inner += ` AND o.urgency = $${params.length}`;
     }
 
     if (stage) {
       params.push(stage);
-      query += ` AND o.stage = $${params.length}`;
+      inner += ` AND o.stage = $${params.length}`;
     }
 
     if (storeId) {
       params.push(storeId);
-      query += ` AND o.store_id = $${params.length}`;
+      inner += ` AND o.store_id = $${params.length}`;
     }
 
-    query += ` GROUP BY o.id, s.id
-              ORDER BY o.urgency ASC, o.delivery_date ASC
-              LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+    inner += ` ORDER BY o.urgency ASC, o.delivery_date ASC
+               LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
 
     params.push(limit, offset);
+
+    const query = `
+      SELECT o.*, s.name as store_name,
+        COALESCE(i.items, '[]'::json) AS items
+      FROM (${inner}) page
+      JOIN orders o ON o.id = page.id
+      LEFT JOIN stores s ON o.store_id = s.id
+      LEFT JOIN LATERAL (
+        SELECT json_agg(json_build_object(
+                 'id', oi.id,
+                 'name', oi.name,
+                 'quantity', oi.quantity,
+                 'sku', oi.sku,
+                 'imageUrl', oi.image_url
+               ) ORDER BY oi.sku ASC) AS items
+        FROM order_items oi WHERE oi.order_id = o.id
+      ) i ON true
+      ORDER BY o.urgency ASC, o.delivery_date ASC`;
 
     const result = await db.query(query, params);
 
