@@ -458,9 +458,16 @@ router.get('/summary', async (req, res, next) => {
     const { storeId, product, dateFrom, dateTo, orderDateFrom, orderDateTo } = req.query;
 
     // Показываем незавершённые заказы (new/accepted/packed/shipping) всегда,
-    // а завершённые/отменённые - только за последние 14 дней (глубина синка Kaspi)
+    // а завершённые/отменённые - только недавние.
+    //
+    // «Недавние» считаем по дате заказа, а не по updated_at. По смыслу это одно и то же:
+    // синхронизация заглядывает в Kaspi на 14 дней назад, поэтому заказ старше двух недель
+    // она уже не трогает и его updated_at не двигается. А вот заливка истории за 2025-2026
+    // проставила 36 тысячам архивных строк сегодняшний updated_at - и сводка, вместо двух
+    // сотен рабочих заказов, начала тянуть всю таблицу с позициями, по полминуты на запрос.
+    // order_date такому не подвержен: он всегда настоящий день заказа.
     const whereClauses = [
-      `(o.stage IN ('new', 'accepted', 'packed', 'shipping') OR o.updated_at >= NOW() - INTERVAL '14 days')`
+      `(o.stage IN ('new', 'accepted', 'packed', 'shipping') OR o.order_date >= NOW() - INTERVAL '14 days')`
     ];
     const params = [];
 
