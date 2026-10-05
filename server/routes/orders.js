@@ -784,18 +784,22 @@ router.post('/assemble-batch', async (req, res, next) => {
       return entry;
     };
 
-    const sortedOrders = await loadOrdersWithSpaces(orderCodes);
-    const foundCodes = new Set(sortedOrders.map(o => o.order_code));
-    const results = [];
-
     note('начало', {
       запросил: req.user?.email || null,
       заказов: orderCodes.length,
       предзаказыРазрешены: allowPreorderArrived,
-      нашлосьВБазе: sortedOrders.length,
     });
-    note('очередь', {
-      порядок: sortedOrders.map(o => `${o.order_code}:${o.urgency || 'без срока'}`).join(', '),
+
+    const loadedAt = Date.now();
+    const sortedOrders = await loadOrdersWithSpaces(orderCodes);
+    const foundCodes = new Set(sortedOrders.map(o => o.order_code));
+    const results = [];
+
+    note('подняли заказы из базы', {
+      занялоМс: Date.now() - loadedAt,
+      нашлось: sortedOrders.length,
+      // Очередь - уже отсортированная: сначала просроченные, потом сегодняшние и так далее
+      порядок: sortedOrders.map(o => `${o.order_code}:${o.urgency || 'без срока'}`).join(', ') || '—',
     });
 
     for (const code of orderCodes) {
