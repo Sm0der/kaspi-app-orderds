@@ -978,7 +978,12 @@ router.post('/assemble-batch', async (req, res, next) => {
         const actuallyAssembled = await confirmAssembledInKaspi(storeConfig.service, order.kaspi_order_id);
         note('перепроверили после ошибки', {
           заказ: order.order_code,
+          ждалиМс: 5000,
           собранНаСамомДеле: Boolean(actuallyAssembled),
+          // Измерено по 316 заказам: у 69% накладная появляется за 15 секунд, но у каждого
+          // двадцатого - через 1-3 минуты, а 90-й процентиль ровно 179 секунд. Пятисекундная
+          // проверка таких не ловит, и заказ уходит в «не прошёл», хотя накладная будет.
+          замечание: actuallyAssembled ? null : 'Kaspi выпускает накладную до 3 минут - повторно формировать нельзя, будет вторая накладная',
         });
         if (actuallyAssembled) {
           results.push({
