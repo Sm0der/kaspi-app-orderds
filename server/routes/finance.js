@@ -16,11 +16,42 @@ const { calculate } = require('../services/costingMath');
 // Здесь только владелец: это выручка, удержания и маржа целиком.
 router.use(requireAdmin);
 
-// Ключ для сопоставления по названию: регистр, ё/е и знаки между словами не должны мешать.
-// Та же нормализация повторена в SQL - менять надо в обоих местах.
+// Ключ для сопоставления по названию: регистр, ё/е и знаки между словами мешать не должны.
 const nameKey = (s) =>
   String(s || '').toLowerCase().replace(/ё/g, 'е').replace(/[^a-zа-я0-9]+/gi, ' ').trim();
-const NAME_KEY_SQL = `lower(regexp_replace(replace(oi.name, 'ё', 'е'), '[^a-zа-я0-9]+', ' ', 'gi'))`;
+
+// Сопоставление названия со списком себестоимости. Точного совпадения мало: на карточке
+// Kaspi к имени дописаны размеры и цвет («Распашной шкаф Лорд, 160x200х49 см, белый»),
+// а в списке стоит короткое «Распашной шкаф Лорд». Поэтому пробуем, как в «Аналитике»:
+// точно, затем самый длинный ключ, с которого название начинается, затем наоборот -
+// название как начало ключа, затем вхождение. Если подходит несколько записей С РАЗНОЙ
+// ценой, не берём ничего: угадать тут дороже, чем показать пробел.
+function makeNameMatcher(rows) {
+  const exact = new Map();
+  const keys = [];
+  for (const r of rows) {
+    const k = nameKey(r.name);
+    if (!k) continue;
+    exact.set(k, Number(r.cost));
+    if (k.length >= 4) keys.push({ k, v: Number(r.cost) });
+  }
+  const only = (list) => (list.length && new Set(list.map((x) => x.v)).size === 1 ? list[0].v : null);
+  return (name) => {
+    const n = nameKey(name);
+    if (!n) return null;
+    if (exact.has(n)) return exact.get(n);
+    let v = only(keys.filter((x) => x.k.length >= 8 && n.startsWith(x.k)));
+    if (v !== null) return v;
+    v = only(keys.filter((x) => n.length >= 9 && x.k.startsWith(n)));
+    if (v !== null) return v;
+    return only(keys.filter((x) => x.k.length >= 12 && n.includes(x.k)));
+  };
+}
+
+async function loadNameCosts() {
+  const { rows } = await db.query('SELECT name, cost FROM cost_by_name');
+  return makeNameMatcher(rows);
+}
 
 const MAX_ROWS = 20000;
 const validDate = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(v || '') ? v : null);
@@ -156,7 +187,7 @@ router.get('/report', async (req, res, next) => {
     const from = validDate(req.query.from), to = validDate(req.query.to);
     if (!from || !to) return res.status(400).json({ error: 'Нужны даты from и to в виде ГГГГ-ММ-ДД' });
 
-    const spec = await costPerProduct();
+    const [spec, byName] = await Promise.all([costPerProduct(), loadNameCosts()]);
 
     const { rows } = await db.query(
       `WITH ops AS (
@@ -170,12 +201,11 @@ router.get('/report', async (req, res, next) => {
          GROUP BY order_code
        )
        SELECT ops.order_code, ops.merchant, ops.amount, ops.fees, ops.delivery,
-              oi.name, oi.quantity, p.cost_product_id, byname.cost AS name_cost
+              oi.name, oi.quantity, p.cost_product_id
        FROM ops
        LEFT JOIN orders o ON o.order_code = ops.order_code
        LEFT JOIN order_items oi ON oi.order_id = o.id
        LEFT JOIN products p ON p.store_id = o.store_id AND p.sku = oi.sku
-       LEFT JOIN cost_by_name byname ON byname.name_key = ${NAME_KEY_SQL}
        ORDER BY ops.order_code`,
       [from, to]
     );
@@ -196,8 +226,7 @@ router.get('/report', async (req, res, next) => {
       // спецификации точнее ручной цифры и не должен ею перебиваться.
       const byCode = r.cost_product_id ? spec.get(r.cost_product_id) : null;
       const fromSpec = byCode && byCode.cost !== null;
-      const unit = fromSpec ? byCode.cost
-        : (r.name_cost === null || r.name_cost === undefined ? null : Number(r.name_cost));
+      const unit = fromSpec ? byCode.cost : byName(r.name);
       o.lines.push({
         name: r.name, quantity: r.quantity || 1, unit,
         source: fromSpec ? 'код технолога' : (unit !== null ? 'список по названию' : null),
@@ -269,7 +298,7 @@ router.get('/uncosted', async (req, res, next) => {
     const from = validDate(req.query.from), to = validDate(req.query.to);
     if (!from || !to) return res.status(400).json({ error: 'Нужны даты from и to' });
 
-    const spec = await costPerProduct();
+    const [spec, byName] = await Promise.all([costPerProduct(), loadNameCosts()]);
     const { rows } = await db.query(
       `WITH ops AS (
          SELECT order_code, SUM(amount) AS amount
@@ -277,19 +306,18 @@ router.get('/uncosted', async (req, res, next) => {
          WHERE op_date BETWEEN $1::date AND $2::date
          GROUP BY order_code HAVING SUM(amount) > 0
        )
-       SELECT oi.name, p.cost_product_id, byname.cost AS name_cost, ops.amount
+       SELECT oi.name, p.cost_product_id, ops.amount
        FROM ops
        JOIN orders o ON o.order_code = ops.order_code
        JOIN order_items oi ON oi.order_id = o.id
-       LEFT JOIN products p ON p.store_id = o.store_id AND p.sku = oi.sku
-       LEFT JOIN cost_by_name byname ON byname.name_key = ${NAME_KEY_SQL}`,
+       LEFT JOIN products p ON p.store_id = o.store_id AND p.sku = oi.sku`,
       [from, to]
     );
 
     const agg = new Map();
     for (const r of rows) {
       const byCode = r.cost_product_id ? spec.get(r.cost_product_id) : null;
-      if ((byCode && byCode.cost !== null) || r.name_cost !== null) continue;
+      if ((byCode && byCode.cost !== null) || byName(r.name) !== null) continue;
       if (!agg.has(r.name)) agg.set(r.name, { name: r.name, orders: 0, amount: 0 });
       const a = agg.get(r.name);
       a.orders++;
