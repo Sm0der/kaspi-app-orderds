@@ -12,6 +12,7 @@ const analyticsRoutes = require('./routes/analytics');
 const adminRoutes = require('./routes/admin');
 const pushRoutes = require('./routes/push');
 const requireAuth = require('./middleware/requireAuth');
+const { requireOrders } = require('./middleware/requireAuth');
 const { initDB, query } = require('./db/init');
 const SyncService = require('./services/syncService');
 
@@ -88,13 +89,13 @@ app.use((req, res, next) => {
 });
 
 // Все заказы/товары - только для вошедших пользователей (см. middleware/requireAuth.js).
-app.use('/api/orders', requireAuth, orderRoutes);
-app.use('/api/crm', requireAuth, crmRoutes);
+app.use('/api/orders', requireAuth, requireOrders, orderRoutes);
+app.use('/api/crm', requireAuth, requireOrders, crmRoutes);
 app.use('/api/users', requireAuth, userRoutes);
-app.use('/api/batches', requireAuth, batchRoutes);
+app.use('/api/batches', requireAuth, requireOrders, batchRoutes);
 // Вывозы, восстановленные по времени формирования накладных - работают и тогда,
 // когда накладные печатают в кабинете Kaspi, а не через наш сервис
-app.use('/api/runs', requireAuth, runRoutes);
+app.use('/api/runs', requireAuth, requireOrders, runRoutes);
 // Себестоимость изделий - внутри роутера доступ сужен до технолога и владельца
 app.use('/api/costing', requireAuth, costingRoutes);
 app.use('/api/analytics', requireAuth, analyticsRoutes);

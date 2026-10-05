@@ -80,6 +80,17 @@ function requireAdmin(req, res, next) {
   next();
 }
 
+// Заказы, накладные и CRM - владельцу и менеджеру. Технолог входит той же учёткой, но
+// ему здесь делать нечего: в заказах суммы, города и имена покупателей, а его работа -
+// спецификации и нормы. Интерфейс и так уводил его сразу в «Себестоимость», но это
+// пряталось только на экране: запрос к /api/orders руками отдавал ему всё.
+function requireOrders(req, res, next) {
+  if (req.userRole !== 'admin' && req.userRole !== 'manager') {
+    return res.status(403).json({ error: 'Раздел заказов доступен владельцу и менеджеру' });
+  }
+  next();
+}
+
 // Себестоимость ведёт технолог, видит её ещё владелец. Менеджеру и складу закрыто:
 // в ней закупочные цены и маржа - это не та цифра, которая нужна на отгрузке.
 function requireCosting(req, res, next) {
@@ -92,3 +103,4 @@ function requireCosting(req, res, next) {
 module.exports = requireAuth;
 module.exports.requireAdmin = requireAdmin;
 module.exports.requireCosting = requireCosting;
+module.exports.requireOrders = requireOrders;
