@@ -130,6 +130,18 @@ async function confirmAssembledInKaspi(service, kaspiOrderId) {
 
 // Ошибки Kaspi приходят по-английски и иногда сформулированы так, что человек читает их
 // как поломку нашего сервиса. Переводим в то, что с заказом делать дальше.
+// Что именно ответил Kaspi - без причёсывания. readableKaspiError переводит это на
+// человеческий для интерфейса, а в журнал формирования кладём исходник: когда владелец
+// разбирает, почему заказ не прошёл, ему нужен их настоящий текст и код ответа.
+function rawKaspiError(error) {
+  return {
+    status: error.response?.status ?? null,
+    title: error.response?.data?.errors?.[0]?.title ?? null,
+    message: error.message || null,
+    body: error.response?.data ? JSON.stringify(error.response.data).slice(0, 600) : null,
+  };
+}
+
 function readableKaspiError(error) {
   const title = error.response?.data?.errors?.[0]?.title;
   const anyText = `${title || ''} ${error.message || ''} ${JSON.stringify(error.response?.data || '')}`;
@@ -755,12 +767,40 @@ router.post('/assemble-batch', async (req, res, next) => {
     // подтверждение «товар есть»). Обычное формирование без флага предзаказы пропускает с ошибкой.
     const allowPreorderArrived = req.body.allowPreorderArrived === true;
 
+    // Журнал формирования. Складывается по шагам и сохраняется вместе с пакетом, чтобы
+    // потом можно было ответить на вопрос «а что там вообще произошло»: какие заказы
+    // взяли, в каком порядке, о чём спросили Kaspi, что он ответил и сколько это заняло.
+    // Одновременно пишем в консоль - там же, в логах Vercel, это видно в реальном времени.
+    const startedAt = Date.now();
+    const log = [];
+    const note = (step, data = {}) => {
+      const entry = { ms: Date.now() - startedAt, step, ...data };
+      log.push(entry);
+      const tail = Object.entries(data)
+        .filter(([, v]) => v !== undefined && v !== null && v !== '')
+        .map(([k, v]) => `${k}=${typeof v === 'object' ? JSON.stringify(v) : v}`)
+        .join(' ');
+      console.log(`[формирование] +${entry.ms}мс ${step}${tail ? ' ' + tail : ''}`);
+      return entry;
+    };
+
     const sortedOrders = await loadOrdersWithSpaces(orderCodes);
     const foundCodes = new Set(sortedOrders.map(o => o.order_code));
     const results = [];
 
+    note('начало', {
+      запросил: req.user?.email || null,
+      заказов: orderCodes.length,
+      предзаказыРазрешены: allowPreorderArrived,
+      нашлосьВБазе: sortedOrders.length,
+    });
+    note('очередь', {
+      порядок: sortedOrders.map(o => `${o.order_code}:${o.urgency || 'без срока'}`).join(', '),
+    });
+
     for (const code of orderCodes) {
       if (!foundCodes.has(code)) {
+        note('не найден в базе', { заказ: code });
         results.push({ order_code: code, success: false, error: 'Заказ не найден в базе' });
       }
     }
@@ -768,11 +808,22 @@ router.post('/assemble-batch', async (req, res, next) => {
     for (const order of sortedOrders) {
       const storeConfig = syncService.services[order.store_id];
       if (!storeConfig) {
+        note('магазин не настроен', { заказ: order.order_code, магазин: order.store_id });
         results.push({ order_code: order.order_code, success: false, error: 'Магазин не настроен' });
         continue;
       }
 
+      note('взят в работу', {
+        заказ: order.order_code,
+        этап: order.stage,
+        срочность: order.urgency || 'без срока',
+        позиций: order.positionsCount,
+        мест: order.numberOfSpace,
+        предзаказ: order.pre_order || false,
+      });
+
       if (!['new', 'accepted', 'packed'].includes(order.stage)) {
+        note('пропущен: неподходящий этап', { заказ: order.order_code, этап: order.stage });
         results.push({
           order_code: order.order_code,
           success: false,
@@ -793,6 +844,11 @@ router.post('/assemble-batch', async (req, res, next) => {
       // в кабинете, stage у нас ещё 'accepted' - без этой проверки его собрали бы повторно,
       // а повторный ASSEMBLE выпускает накладную с новым номером.
       if (order.stage === 'packed' || order.waybill_number) {
+        note('уже собран ранее, Kaspi не трогаем', {
+          заказ: order.order_code,
+          причина: order.stage === 'packed' ? 'этап packed' : 'есть номер накладной',
+          накладная: order.waybill_number || null,
+        });
         results.push({
           order_code: order.order_code,
           success: true,
@@ -812,9 +868,18 @@ router.post('/assemble-batch', async (req, res, next) => {
       // видна, и второй ASSEMBLE (он перевыпускает накладную с новым номером) не уйдёт.
       // Если Kaspi не ответил на чтение - не блокируем формирование, работаем как раньше.
       try {
+        const askedAt = Date.now();
         const live = await storeConfig.service.getOrderDetails(order.kaspi_order_id);
         const liveWaybill = live?.attributes?.kaspiDelivery?.waybillNumber;
+        note('спросили Kaspi о состоянии', {
+          заказ: order.order_code,
+          занялоМс: Date.now() - askedAt,
+          статус: live?.attributes?.status || null,
+          собран: live?.attributes?.assembled === true,
+          накладная: liveWaybill || null,
+        });
         if (live?.attributes?.assembled === true || liveWaybill) {
+          note('Kaspi уже собрал его сам', { заказ: order.order_code, накладная: liveWaybill || null });
           results.push({
             order_code: order.order_code,
             success: true,
@@ -826,8 +891,12 @@ router.post('/assemble-batch', async (req, res, next) => {
           });
           continue;
         }
-      } catch {
+      } catch (readError) {
         // чтение не удалось - решает дальнейший поток
+        note('не удалось прочитать состояние, продолжаем', {
+          заказ: order.order_code,
+          ответ: rawKaspiError(readError),
+        });
       }
 
       // Объявлено до try: понадобится и в catch, когда будем разбирать ложный отказ
@@ -836,7 +905,9 @@ router.post('/assemble-batch', async (req, res, next) => {
       try {
         // Заказ ещё не принят продавцом - сначала принимаем, потом комплектуем
         if (order.stage === 'new') {
+          const t = Date.now();
           await storeConfig.service.acceptOrder(order.kaspi_order_id);
+          note('приняли заказ (ACCEPT)', { заказ: order.order_code, занялоМс: Date.now() - t });
         }
 
         // Предзаказ: Kaspi отклонит ASSEMBLE, пока товар не отмечен поступившим (ARRIVED).
@@ -844,6 +915,7 @@ router.post('/assemble-batch', async (req, res, next) => {
         // чтобы случайно не заявить Kaspi о поступлении того, чего нет (грозит штрафом).
         if (order.pre_order) {
           if (!allowPreorderArrived) {
+            note('предзаказ пропущен: нет подтверждения наличия', { заказ: order.order_code });
             results.push({
               order_code: order.order_code,
               success: false,
@@ -853,9 +925,18 @@ router.post('/assemble-batch', async (req, res, next) => {
             continue;
           }
           try {
+            const t = Date.now();
             await storeConfig.service.markArrived(order.kaspi_order_id);
             arrived = true;
+            note('отметили поступление (ARRIVED)', { заказ: order.order_code, занялоМс: Date.now() - t });
           } catch (arrivedError) {
+            note('ARRIVED отклонён', {
+              заказ: order.order_code,
+              ответ: rawKaspiError(arrivedError),
+              решение: arrivedError.response?.status === 404
+                ? 'считаем, что поступление уже отмечено, идём дальше'
+                : 'прерываем заказ',
+            });
             // Kaspi отвечает 404 "Order not found" на ARRIVED, если поступление по этому
             // предзаказу уже отмечено раньше (в кабинете или прошлой попыткой) - сам заказ
             // при этом жив и читается через GET. Проверено на живых заказах: пять одинаковых
@@ -866,7 +947,13 @@ router.post('/assemble-batch', async (req, res, next) => {
           }
         }
 
+        const assembleAt = Date.now();
         await storeConfig.service.assembleOrder(order.kaspi_order_id, order.numberOfSpace);
+        note('сформировали накладную (ASSEMBLE)', {
+          заказ: order.order_code,
+          мест: order.numberOfSpace,
+          занялоМс: Date.now() - assembleAt,
+        });
         results.push({
           order_code: order.order_code,
           success: true,
@@ -878,8 +965,17 @@ router.post('/assemble-batch', async (req, res, next) => {
           numberOfSpace: order.numberOfSpace
         });
       } catch (error) {
+        note('Kaspi ответил ошибкой', {
+          заказ: order.order_code,
+          ответ: rawKaspiError(error),
+          показываемЧеловеку: readableKaspiError(error),
+        });
         // Ошибка могла быть ложной - Kaspi иногда падает уже после того, как собрал заказ
         const actuallyAssembled = await confirmAssembledInKaspi(storeConfig.service, order.kaspi_order_id);
+        note('перепроверили после ошибки', {
+          заказ: order.order_code,
+          собранНаСамомДеле: Boolean(actuallyAssembled),
+        });
         if (actuallyAssembled) {
           results.push({
             order_code: order.order_code,
@@ -897,6 +993,7 @@ router.post('/assemble-batch', async (req, res, next) => {
           continue;
         }
 
+        note('заказ не прошёл', { заказ: order.order_code, причина: readableKaspiError(error) });
         results.push({
           order_code: order.order_code,
           success: false,
@@ -925,6 +1022,7 @@ router.post('/assemble-batch', async (req, res, next) => {
          WHERE order_code = ANY($1)`,
         [newlyAssembled]
       );
+      note('перевели в «собран» у себя', { заказов: newlyAssembled.length, список: newlyAssembled.join(', ') });
     }
 
     // Записываем пакет в архив: по нему потом видно, когда и что формировали, и из него
@@ -957,8 +1055,8 @@ router.post('/assemble-batch', async (req, res, next) => {
            WHERE (created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Almaty')::date
                = (NOW() AT TIME ZONE 'Asia/Almaty')::date
          )
-         INSERT INTO assembly_batches (created_by, order_codes, succeeded, failed, spaces_total, results, wave_number)
-         SELECT $1, $2, $3, $4, $5, $6, next_wave.n FROM next_wave
+         INSERT INTO assembly_batches (created_by, order_codes, succeeded, failed, spaces_total, results, wave_number, log)
+         SELECT $1, $2, $3, $4, $5, $6, next_wave.n, $7 FROM next_wave
          RETURNING id, wave_number`,
         [
           req.user?.email || null,
@@ -966,12 +1064,21 @@ router.post('/assemble-batch', async (req, res, next) => {
           results.filter(r => r.success).length,
           results.filter(r => !r.success).length,
           spacesTotal,
-          JSON.stringify(results)
+          JSON.stringify(results),
+          JSON.stringify(log)
         ]
       );
       batchId = saved.rows[0].id;
       waveNumber = saved.rows[0].wave_number;
     }
+
+    note('готово', {
+      всего: orderCodes.length,
+      успешно: results.filter(r => r.success).length,
+      неудачно: results.filter(r => !r.success).length,
+      вывоз: waveNumber,
+      пакет: batchId,
+    });
 
     res.json({
       batchId,
@@ -979,7 +1086,8 @@ router.post('/assemble-batch', async (req, res, next) => {
       total: orderCodes.length,
       succeeded: results.filter(r => r.success).length,
       failed: results.filter(r => !r.success).length,
-      results
+      results,
+      log
     });
   } catch (error) {
     next(error);

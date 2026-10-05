@@ -122,6 +122,11 @@ CREATE INDEX IF NOT EXISTS idx_orders_urgency ON orders(urgency);
 -- По одиночным индексам Postgres для этого сортировал всю таблицу - на 39 тысячах строк
 -- это 10 секунд на запрос; составной отдаёт первые 50 строк сразу.
 CREATE INDEX IF NOT EXISTS idx_orders_urgency_delivery ON orders(urgency, delivery_date);
+
+-- Журнал формирования: по шагам, что мы спросили у Kaspi и что он ответил. Лежит рядом
+-- с самим пакетом, чтобы на вопрос «почему этот заказ не прошёл» можно было ответить
+-- фактами, а не догадками - ответ Kaspi там сохранён как есть, без причёсывания.
+ALTER TABLE assembly_batches ADD COLUMN IF NOT EXISTS log JSONB;
 CREATE INDEX IF NOT EXISTS idx_orders_stage ON orders(stage);
 CREATE INDEX IF NOT EXISTS idx_order_items_order_id ON order_items(order_id);
 CREATE INDEX IF NOT EXISTS idx_order_items_product_code ON order_items(product_code);

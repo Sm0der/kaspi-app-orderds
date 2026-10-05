@@ -236,11 +236,58 @@ function BatchRow({ batch, open, detail, busyId, onToggle, onDownload }) {
                     </div>
                   );
                 })}
+                <AssemblyLog log={detail.log} />
               </div>
             )}
           </td>
         </tr>
       )}
     </>
+  );
+}
+
+// Журнал формирования: по шагам, что делали и что ответил Kaspi. Свёрнут по умолчанию -
+// в обычный день он не нужен, а вот когда заказ не прошёл, это единственное место, где
+// видно настоящую причину, а не её пересказ.
+function AssemblyLog({ log }) {
+  const [open, setOpen] = useState(false);
+  if (!Array.isArray(log) || log.length === 0) return null;
+
+  return (
+    <div style={{ borderTop: '1px solid var(--line)', marginTop: 4, paddingTop: 8 }}>
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="t-dim"
+        style={{ background: 'none', border: 0, padding: 0, cursor: 'pointer', font: 'inherit' }}
+      >
+        {open ? '▾' : '▸'} Журнал формирования · {log.length} шагов
+      </button>
+
+      {open && (
+        <div
+          className="mono"
+          style={{
+            marginTop: 8, display: 'grid', gap: 2, fontSize: 12,
+            maxHeight: 360, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+          }}
+        >
+          {log.map((entry, i) => {
+            const { ms, step, ...rest } = entry;
+            const details = Object.entries(rest)
+              .filter(([, v]) => v !== null && v !== undefined && v !== '')
+              .map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}`)
+              .join('  ');
+            return (
+              <div key={i} style={{ display: 'flex', gap: 8 }}>
+                <span className="t-faint" style={{ minWidth: 58, textAlign: 'right' }}>+{ms} мс</span>
+                <span style={{ minWidth: 210 }}>{step}</span>
+                <span className="t-dim" style={{ flex: 1 }}>{details}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }

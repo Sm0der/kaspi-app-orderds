@@ -151,7 +151,7 @@ router.get('/:id/waybills.zip', async (req, res, next) => {
 async function findBatch(id) {
   if (!/^\d+$/.test(String(id))) return null;
   const result = await db.query(
-    `SELECT id, created_at, created_by, order_codes, succeeded, failed, spaces_total, results, wave_number
+    `SELECT id, created_at, created_by, order_codes, succeeded, failed, spaces_total, results, wave_number, log
      FROM assembly_batches WHERE id = $1`,
     [id]
   );
