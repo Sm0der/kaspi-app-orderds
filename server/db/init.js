@@ -127,6 +127,43 @@ CREATE INDEX IF NOT EXISTS idx_orders_urgency_delivery ON orders(urgency, delive
 -- с самим пакетом, чтобы на вопрос «почему этот заказ не прошёл» можно было ответить
 -- фактами, а не догадками - ответ Kaspi там сохранён как есть, без причёсывания.
 ALTER TABLE assembly_batches ADD COLUMN IF NOT EXISTS log JSONB;
+
+-- Выгрузка Kaspi Pay: фактические деньги по каждой операции. Комиссию площадки API
+-- заказов не отдаёт вовсе, а это единственный источник, где она есть по факту, а не
+-- ставкой. Загружается файлом из кабинета (Отчёт по продажам), ключ - номер операции:
+-- по одному заказу их бывает несколько (доплата, частичный возврат).
+CREATE TABLE IF NOT EXISTS kaspi_pay_operations (
+  id           SERIAL PRIMARY KEY,
+  order_code   VARCHAR(50) NOT NULL,
+  merchant     VARCHAR(120),
+  op_date      DATE NOT NULL,
+  op_time      VARCHAR(10),
+  amount       NUMERIC(14,2) NOT NULL,
+  fee_total    NUMERIC(14,2) NOT NULL DEFAULT 0,
+  delivery     NUMERIC(14,2) NOT NULL DEFAULT 0,
+  other_fees   NUMERIC(14,2) NOT NULL DEFAULT 0,
+  payment_term VARCHAR(20),
+  item_name    TEXT,
+  imported_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  source_file  TEXT,
+  UNIQUE (order_code, op_date, op_time, amount)
+);
+CREATE INDEX IF NOT EXISTS idx_kaspi_pay_date ON kaspi_pay_operations(op_date);
+CREATE INDEX IF NOT EXISTS idx_kaspi_pay_order ON kaspi_pay_operations(order_code);
+
+-- Себестоимость по названию изделия. Владелец ведёт её списком (его «Калькулятор»),
+-- и это отдельная опора от cost_products: там спецификация и код технолога, здесь
+-- просто цифра на имя карточки. Расчёт прибыли сначала смотрит код технолога,
+-- и только если его нет - сюда.
+CREATE TABLE IF NOT EXISTS cost_by_name (
+  id         SERIAL PRIMARY KEY,
+  name       TEXT NOT NULL,
+  name_key   TEXT NOT NULL UNIQUE,
+  cost       NUMERIC(14,2) NOT NULL,
+  note       TEXT,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_by VARCHAR(255)
+);
 CREATE INDEX IF NOT EXISTS idx_orders_stage ON orders(stage);
 CREATE INDEX IF NOT EXISTS idx_order_items_order_id ON order_items(order_id);
 CREATE INDEX IF NOT EXISTS idx_order_items_product_code ON order_items(product_code);

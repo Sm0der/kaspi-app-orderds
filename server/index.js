@@ -12,6 +12,7 @@ const analyticsRoutes = require('./routes/analytics');
 const adminRoutes = require('./routes/admin');
 const pushRoutes = require('./routes/push');
 const requireAuth = require('./middleware/requireAuth');
+const financeRoutes = require('./routes/finance');
 const { requireOrders } = require('./middleware/requireAuth');
 const { initDB, query } = require('./db/init');
 const SyncService = require('./services/syncService');
@@ -99,6 +100,7 @@ app.use('/api/runs', requireAuth, requireOrders, runRoutes);
 // Себестоимость изделий - внутри роутера доступ сужен до технолога и владельца
 app.use('/api/costing', requireAuth, costingRoutes);
 app.use('/api/analytics', requireAuth, analyticsRoutes);
+app.use('/api/finance', requireAuth, financeRoutes);
 app.use('/api/admin', requireAuth, adminRoutes);
 // Без requireAuth сюда мог зайти кто угодно без токена: читать историю уведомлений,
 // слать себе тестовые push и подписывать/отписывать чужие endpoint'ы

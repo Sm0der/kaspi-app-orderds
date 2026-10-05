@@ -73,6 +73,11 @@ export default function TopBar({
           </button>
         )}
         {isAdmin && (
+          <button data-active={mode === 'finance'} onClick={() => onModeChange('finance')}>
+            Деньги
+          </button>
+        )}
+        {isAdmin && (
           <button data-active={mode === 'settings'} onClick={() => onModeChange('settings')}>
             Админ-панель
           </button>
