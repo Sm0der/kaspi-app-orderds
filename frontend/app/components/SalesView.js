@@ -35,14 +35,19 @@ const dateLabel = (iso) => {
 
 // Рост и падение подписываем знаком и цветом. null - показателя в прошлом периоде
 // не было вовсе: это «появилось», а не «рост на бесконечность».
-function Change({ value, isNew }) {
+function Change({ value, isNew, byCard }) {
   if (value === null || value === undefined) {
     return <span className="t-faint">{isNew ? 'новое' : '—'}</span>;
   }
   const up = value > 0;
   return (
-    <span className="trend" data-dir={up ? 'up' : value < 0 ? 'down' : 'flat'}>
+    <span
+      className="trend"
+      data-dir={up ? 'up' : value < 0 ? 'down' : 'flat'}
+      title={byCard ? 'позиция переехала между нашими магазинами — сравниваем по карточке Kaspi целиком' : undefined}
+    >
       {up ? '+' : ''}{String(value).replace('.', ',')}%
+      {byCard && <span className="t-faint" style={{ fontWeight: 400 }}> ↔</span>}
     </span>
   );
 }
@@ -335,7 +340,12 @@ export default function SalesView({ range, storeId }) {
                       ? <span className="t-faint">самые дешёвые</span>
                       : <span className="t-faint">—</span>}
                 </td>
-                <td className="num ta-r"><Change value={p.qtyChange} isNew={p.prevQty === 0} /></td>
+                <td className="num ta-r">
+                  <Change value={p.qtyChange} isNew={p.prevQty === 0} byCard={p.movedBetweenStores} />
+                  {p.movedBetweenStores && (
+                    <div className="t-faint" style={{ fontSize: 12 }}>переехал, по карточке</div>
+                  )}
+                </td>
                 <td className="num ta-r t-dim">
                   {dateLabel(p.lastSold)}
                   {p.daysSinceSale !== null && p.daysSinceSale > 14 && (

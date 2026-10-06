@@ -251,6 +251,21 @@ router.get('/sales', async (req, res, next) => {
     const prevQty = new Map(prevItems.rows.map((r) => [`${r.store_id}:${r.sku}`, r.qty]));
     const rankBySku = new Map(ranks.rows.map((r) => [`${r.store_id}:${r.sku}`, r]));
 
+    // Те же продажи, но сложенные по карточке Kaspi, а не по артикулу магазина.
+    // Нужно для переездов: позиция уходит в соседний магазин под новым артикулом,
+    // и сравнение по артикулу показывает «новое» там и обвал здесь, хотя продажи
+    // просто перетекли. Карточка у них общая, и по ней видно, что было на самом деле.
+    const sumByCard = (rows) => {
+      const out = new Map();
+      for (const r of rows) {
+        if (!r.card_id) continue;
+        out.set(r.card_id, (out.get(r.card_id) || 0) + r.qty);
+      }
+      return out;
+    };
+    const prevByCard = sumByCard(prevItems.rows);
+    const nowByCard = sumByCard(items.rows);
+
     const totalRevenue = categories.rows.reduce((sum, r) => sum + Number(r.revenue), 0);
 
     const categoryList = categories.rows.map((r) => {
@@ -284,6 +299,15 @@ router.get('/sales', async (req, res, next) => {
       const wasQty = prevQty.get(key) ?? 0;
       const touched = r.qty + r.cancelled_qty;
 
+      // Под этим артикулом в прошлом периоде не продавали, а карточка продавалась -
+      // значит позиция переехала. Тогда честнее сравнить по карточке и сказать об этом,
+      // чем подписать бестселлер словом «новое».
+      const wasCard = r.card_id ? prevByCard.get(r.card_id) ?? 0 : 0;
+      const nowCard = r.card_id ? nowByCard.get(r.card_id) ?? 0 : 0;
+      const moved = wasQty === 0 && wasCard > 0;
+      const changeFrom = moved ? wasCard : wasQty;
+      const changeTo = moved ? nowCard : r.qty;
+
       return {
         storeId: r.store_id,
         storeName: r.store_name,
@@ -308,7 +332,9 @@ router.get('/sales', async (req, res, next) => {
           ? Math.round((Date.parse(today) - Date.parse(r.last_sold)) / 86400000)
           : null,
         prevQty: wasQty,
-        qtyChange: wasQty > 0 ? Math.round(((r.qty - wasQty) / wasQty) * 1000) / 10 : null,
+        qtyChange: changeFrom > 0 ? Math.round(((changeTo - changeFrom) / changeFrom) * 1000) / 10 : null,
+        // Сравнение сделано по карточке, а не по артикулу - интерфейс это подписывает
+        movedBetweenStores: moved,
         card: rank && {
           cardId: rank.card_id,
           place: rank.place,
@@ -346,6 +372,12 @@ router.get('/sales', async (req, res, next) => {
 // поэтому берём из заказа: покрытие 100%, и оно историческое, а не на сегодня.
 const ITEM_CATEGORY = "oi.raw_data->'attributes'->'category'->>'title'";
 const ITEM_PRICE = "(oi.raw_data->'attributes'->>'totalPrice')::numeric";
+// Номер общей карточки Kaspi. Он один и тот же, когда позиция переезжает между нашими
+// магазинами или её пересоздают под новым артикулом - а это происходит регулярно.
+// Без него сравнение с прошлым периодом врёт: бестселлер, уехавший из одного магазина
+// в другой, в одном показывался как «новое», а в другом как падение на 83%.
+const ITEM_CARD =
+  "convert_from(decode(oi.raw_data->'relationships'->'product'->'data'->>'id', 'base64'), 'UTF8')";
 
 function categoryRows([from, to, store]) {
   return db.query(
@@ -369,6 +401,7 @@ function itemRows([from, to, store]) {
     `WITH ${SCOPE}
      SELECT scope.store_id, oi.sku,
             (ARRAY_AGG(oi.name ORDER BY scope.created_day DESC))[1] AS name,
+            MAX(${ITEM_CARD}) AS card_id,
             COALESCE(MAX(${ITEM_CATEGORY}), 'без категории') AS category,
             COALESCE(SUM(oi.quantity) FILTER (WHERE NOT scope.cancelled), 0)::int AS qty,
             COALESCE(SUM(${ITEM_PRICE}) FILTER (WHERE NOT scope.cancelled), 0)::numeric AS revenue,
@@ -391,7 +424,7 @@ function itemRows([from, to, store]) {
 function prevItemRows([from, to, store]) {
   return db.query(
     `WITH ${SCOPE}
-     SELECT scope.store_id, oi.sku,
+     SELECT scope.store_id, oi.sku, MAX(${ITEM_CARD}) AS card_id,
             COALESCE(SUM(oi.quantity) FILTER (WHERE NOT scope.cancelled), 0)::int AS qty
      FROM scope JOIN order_items oi ON oi.order_id = scope.id
      GROUP BY scope.store_id, oi.sku`,
