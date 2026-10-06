@@ -214,6 +214,26 @@ CREATE INDEX IF NOT EXISTS idx_orders_waybill_made_at ON orders(waybill_made_at)
 -- выглядела сломанной, хотя честно отработала.
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS waybill_stamp_failed_at TIMESTAMPTZ;
 
+-- Наше место на общей карточке Kaspi. Одну карточку делят несколько продавцов, список
+-- предложений отсортирован по цене - место в нём и есть ответ на «какие мы по счёту».
+-- Таблица, а не вычисление на лету: публичный каталог Kaspi блокирует IP дата-центров
+-- (см. services/kaspiCatalog.js), поэтому места собирает скрипт с обычного адреса
+-- (scripts/fetch-card-ranks.js), а аналитика их только читает.
+CREATE TABLE IF NOT EXISTS product_card_ranks (
+  store_id      INTEGER NOT NULL REFERENCES stores(id),
+  sku           VARCHAR(64) NOT NULL,
+  card_id       VARCHAR(64) NOT NULL,
+  -- NULL = нашего предложения на карточке нет: снято с продажи или кончился остаток,
+  -- в выдаче Kaspi такие не показываются вовсе. Это тоже ответ, и важный.
+  place         INTEGER,
+  offers_total  INTEGER NOT NULL,
+  our_price     NUMERIC(12, 2),
+  best_price    NUMERIC(12, 2),
+  best_seller   VARCHAR(200),
+  checked_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (store_id, sku)
+);
+
 -- Миграция: хеш присланного Kaspi JSON заказа. У Kaspi нет фильтра "изменённые с ...",
 -- он всегда отдаёт все заказы за 14 дней, поэтому изменившиеся мы вычисляем сами -
 -- сравнением хеша. Без этого каждая синхронизация переписывала все ~1300 заказов,

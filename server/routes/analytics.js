@@ -214,6 +214,247 @@ router.get('/overview', async (req, res, next) => {
   }
 });
 
+// GET /api/analytics/sales - подробно про продажи: категории, каждая позиция,
+// кандидаты на снятие и наше место на общих карточках Kaspi.
+//
+// Отдельно от /overview намеренно. Там восемь проходов по таблице заказов ради денег и
+// логистики, и за два года это одиннадцать секунд; здесь свои тяжёлые проходы по
+// позициям заказов. Сложив их в один ответ, мы бы заставили владельца ждать оба набора
+// цифр, даже когда ему нужен один.
+router.get('/sales', async (req, res, next) => {
+  try {
+    const { from, to, store } = parseRange(req);
+    const args = [from, to, store];
+
+    // Предыдущий период такой же длины - чтобы к каждой строке можно было дописать
+    // «растёт» или «падает». Без сравнения таблица отвечает «сколько», но не «куда».
+    const days = Math.round((Date.parse(to) - Date.parse(from)) / 86400000) + 1;
+    const shift = (day, by) => new Date(Date.parse(day) - by * 86400000).toISOString().slice(0, 10);
+    const prevArgs = [shift(from, days), shift(from, 1), store];
+
+    const [categories, prevCategories, items, prevItems, ranks, costs] = await Promise.all([
+      categoryRows(args),
+      categoryRows(prevArgs),
+      itemRows(args),
+      prevItemRows(prevArgs),
+      db.query(
+        `SELECT r.store_id, r.sku, r.card_id, r.place, r.offers_total,
+                r.our_price, r.best_price, r.best_seller, r.checked_at
+         FROM product_card_ranks r
+         WHERE ($1::int IS NULL OR r.store_id = $1)`,
+        [store]
+      ),
+      costPerProduct(),
+    ]);
+
+    const prevCat = new Map(prevCategories.rows.map((r) => [r.category, Number(r.revenue)]));
+    const prevQty = new Map(prevItems.rows.map((r) => [`${r.store_id}:${r.sku}`, r.qty]));
+    const rankBySku = new Map(ranks.rows.map((r) => [`${r.store_id}:${r.sku}`, r]));
+
+    const totalRevenue = categories.rows.reduce((sum, r) => sum + Number(r.revenue), 0);
+
+    const categoryList = categories.rows.map((r) => {
+      const was = prevCat.get(r.category) ?? null;
+      return {
+        category: r.category,
+        orders: r.orders,
+        qty: r.qty,
+        revenue: Number(r.revenue),
+        share: totalRevenue > 0 ? Math.round((Number(r.revenue) / totalRevenue) * 1000) / 10 : 0,
+        avgPrice: r.qty > 0 ? Math.round(Number(r.revenue) / r.qty) : 0,
+        cancelledQty: r.cancelled_qty,
+        cancelShare: r.qty + r.cancelled_qty > 0
+          ? Math.round((r.cancelled_qty / (r.qty + r.cancelled_qty)) * 1000) / 10
+          : 0,
+        positions: r.positions,
+        // null - в прошлом периоде категории не было вовсе: это не «рост на бесконечность»,
+        // а «появилась», и интерфейс должен сказать именно так.
+        prevRevenue: was,
+        change: was && was > 0 ? Math.round(((Number(r.revenue) - was) / was) * 1000) / 10 : null,
+      };
+    });
+
+    const today = new Date(Date.now() + 5 * 3600000).toISOString().slice(0, 10);
+    const productList = items.rows.map((r) => {
+      const key = `${r.store_id}:${r.sku}`;
+      const found = r.cost_product_id ? costs.get(r.cost_product_id) : null;
+      const unitCost = found && found.cost !== null ? found.cost : null;
+      const revenue = Number(r.revenue);
+      const rank = rankBySku.get(key) || null;
+      const wasQty = prevQty.get(key) ?? 0;
+      const touched = r.qty + r.cancelled_qty;
+
+      return {
+        storeId: r.store_id,
+        storeName: r.store_name,
+        sku: r.sku,
+        name: r.name,
+        category: r.category,
+        qty: r.qty,
+        revenue,
+        avgPrice: r.qty > 0 ? Math.round(revenue / r.qty) : 0,
+        // Маржа - только по связанным с «Себестоимостью». Без связи прочерк честнее,
+        // чем выручка, выданная за прибыль.
+        cost: unitCost !== null ? Math.round(unitCost * r.qty) : null,
+        profit: unitCost !== null ? Math.round(revenue - unitCost * r.qty) : null,
+        margin: unitCost !== null && revenue > 0
+          ? Math.round(((revenue - unitCost * r.qty) / revenue) * 1000) / 10
+          : null,
+        costCode: found ? found.code : null,
+        cancelledQty: r.cancelled_qty,
+        cancelShare: touched > 0 ? Math.round((r.cancelled_qty / touched) * 1000) / 10 : 0,
+        lastSold: r.last_sold,
+        daysSinceSale: r.last_sold
+          ? Math.round((Date.parse(today) - Date.parse(r.last_sold)) / 86400000)
+          : null,
+        prevQty: wasQty,
+        qtyChange: wasQty > 0 ? Math.round(((r.qty - wasQty) / wasQty) * 1000) / 10 : null,
+        card: rank && {
+          cardId: rank.card_id,
+          place: rank.place,
+          offersTotal: rank.offers_total,
+          ourPrice: rank.our_price !== null ? Number(rank.our_price) : null,
+          bestPrice: rank.best_price !== null ? Number(rank.best_price) : null,
+          bestSeller: rank.best_seller,
+          // Насколько мы дороже самого дешёвого чужого предложения
+          gap: rank.our_price !== null && rank.best_price !== null
+            ? Math.round(Number(rank.our_price) - Number(rank.best_price))
+            : null,
+          checkedAt: rank.checked_at,
+        },
+      };
+    });
+
+    res.json({
+      range: { from, to, store, days },
+      previous: { from: prevArgs[0], to: prevArgs[1] },
+      revenue: totalRevenue,
+      categories: categoryList,
+      products: productList,
+      drop: dropCandidates(productList, days),
+      ranksCheckedAt: ranks.rows.reduce(
+        (latest, r) => (!latest || r.checked_at > latest ? r.checked_at : latest), null
+      ),
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Категория приходит в самой позиции заказа (attributes.category.title) - это та же
+// категория, по которой покупатель ищет на Kaspi. В products колонка category пустая,
+// поэтому берём из заказа: покрытие 100%, и оно историческое, а не на сегодня.
+const ITEM_CATEGORY = "oi.raw_data->'attributes'->'category'->>'title'";
+const ITEM_PRICE = "(oi.raw_data->'attributes'->>'totalPrice')::numeric";
+
+function categoryRows([from, to, store]) {
+  return db.query(
+    `WITH ${SCOPE}
+     SELECT COALESCE(${ITEM_CATEGORY}, 'без категории') AS category,
+            COUNT(DISTINCT scope.id) FILTER (WHERE NOT scope.cancelled)::int AS orders,
+            COALESCE(SUM(oi.quantity) FILTER (WHERE NOT scope.cancelled), 0)::int AS qty,
+            COALESCE(SUM(${ITEM_PRICE}) FILTER (WHERE NOT scope.cancelled), 0)::numeric AS revenue,
+            COALESCE(SUM(oi.quantity) FILTER (WHERE scope.cancelled), 0)::int AS cancelled_qty,
+            COUNT(DISTINCT oi.sku)::int AS positions
+     FROM scope JOIN order_items oi ON oi.order_id = scope.id
+     GROUP BY 1 ORDER BY revenue DESC`,
+    [from, to, store]
+  );
+}
+
+// Все позиции периода, а не топ-25: вопрос «что снять с продажи» живёт как раз в хвосте
+// списка, и обрезание сверху отвечает ровно на другой вопрос.
+function itemRows([from, to, store]) {
+  return db.query(
+    `WITH ${SCOPE}
+     SELECT scope.store_id, oi.sku,
+            (ARRAY_AGG(oi.name ORDER BY scope.created_day DESC))[1] AS name,
+            COALESCE(MAX(${ITEM_CATEGORY}), 'без категории') AS category,
+            COALESCE(SUM(oi.quantity) FILTER (WHERE NOT scope.cancelled), 0)::int AS qty,
+            COALESCE(SUM(${ITEM_PRICE}) FILTER (WHERE NOT scope.cancelled), 0)::numeric AS revenue,
+            COALESCE(SUM(oi.quantity) FILTER (WHERE scope.cancelled), 0)::int AS cancelled_qty,
+            MAX(scope.created_day) FILTER (WHERE NOT scope.cancelled)::text AS last_sold,
+            MAX(p.cost_product_id) AS cost_product_id,
+            MAX(s.name) AS store_name
+     FROM scope
+     JOIN order_items oi ON oi.order_id = scope.id
+     JOIN stores s ON s.id = scope.store_id
+     LEFT JOIN products p ON p.sku = oi.sku AND p.store_id = scope.store_id
+     GROUP BY scope.store_id, oi.sku
+     ORDER BY revenue DESC`,
+    [from, to, store]
+  );
+}
+
+// Для прошлого периода нужны только количества - сравнивать выручку по позиции
+// бессмысленно, цена за это время могла поменяться.
+function prevItemRows([from, to, store]) {
+  return db.query(
+    `WITH ${SCOPE}
+     SELECT scope.store_id, oi.sku,
+            COALESCE(SUM(oi.quantity) FILTER (WHERE NOT scope.cancelled), 0)::int AS qty
+     FROM scope JOIN order_items oi ON oi.order_id = scope.id
+     GROUP BY scope.store_id, oi.sku`,
+    [from, to, store]
+  );
+}
+
+/**
+ * Кандидаты на снятие с продажи. Не приговор, а повод посмотреть: решение за владельцем,
+ * поэтому у каждой строки написана причина, а не просто флаг.
+ *
+ * Правила намеренно простые и объяснимые:
+ *  - торгуем в убыток - себестоимость выше цены, это не обсуждается;
+ *  - заказы массово отменяют - значит товара нет или он не тот, что на карточке;
+ *  - давно не продавалось, хотя предложение на Kaspi висит;
+ *  - наценка меньше десятой доли при живых продажах - работаем за склад.
+ * Товары без связи с «Себестоимостью» по марже не судим: там не ноль, там неизвестно.
+ */
+// 1 день, 2 дня, 5 дней - иначе в причинах стоит «51 дней»
+function plural(n, one, few, many) {
+  const mod100 = n % 100;
+  const mod10 = n % 10;
+  if (mod100 >= 11 && mod100 <= 14) return many;
+  if (mod10 === 1) return one;
+  if (mod10 >= 2 && mod10 <= 4) return few;
+  return many;
+}
+
+function dropCandidates(products, days) {
+  const quiet = Math.max(30, Math.round(days / 2));
+  const out = [];
+
+  for (const p of products) {
+    const reasons = [];
+    if (p.profit !== null && p.profit < 0) {
+      reasons.push(`продаём в минус: ${Math.abs(p.profit).toLocaleString('ru-RU')} ₸ за период`);
+    } else if (p.margin !== null && p.margin < 10 && p.qty > 0) {
+      reasons.push(`наценка ${String(p.margin).replace('.', ',')}% — работаем почти даром`);
+    }
+    if (p.cancelledQty >= 3 && p.cancelShare >= 40) {
+      reasons.push(`отменяют ${p.cancelShare}% заказов (${p.cancelledQty} шт)`);
+    }
+    if (p.daysSinceSale !== null && p.daysSinceSale >= quiet) {
+      reasons.push(`не продавалось ${p.daysSinceSale} ${plural(p.daysSinceSale, 'день', 'дня', 'дней')}`);
+    }
+    // Нашего предложения на карточке нет - оно уже снято или кончился остаток.
+    // Это не повод снимать, это повод знать: товар не продаётся, потому что его не видно.
+    if (p.card && p.card.place === null) {
+      reasons.push(`на карточке нас нет — снято или нет остатка (${p.card.offersTotal} чужих предложений)`);
+    } else if (p.card && p.card.place > 10 && p.card.gap > 0) {
+      reasons.push(`${p.card.place}-е место из ${p.card.offersTotal}, дороже рынка на ${p.card.gap.toLocaleString('ru-RU')} ₸`);
+    }
+
+    if (reasons.length > 0) out.push({ ...p, reasons });
+  }
+
+  // Сверху те, где на кону больше денег: убыток важнее тишины на складе
+  return out.sort((a, b) => {
+    const loss = (x) => (x.profit !== null && x.profit < 0 ? -x.profit : 0);
+    return loss(b) - loss(a) || b.reasons.length - a.reasons.length || b.revenue - a.revenue;
+  });
+}
+
 // Себестоимость каждого изделия - теми же формулами, что и раздел «Себестоимость»
 async function costPerProduct() {
   const { rows: products } = await db.query('SELECT * FROM cost_products');

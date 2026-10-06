@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, errorText } from '../lib/api';
 import PeriodPicker, { presetRange, rangeLabel } from './PeriodPicker';
+import SalesView from './SalesView';
 
 // Аналитика владельца: деньги, логистика и выработка людей за выбранный период.
 // Раздел только читает - ничего не формирует и не меняет, поэтому его можно открывать
@@ -44,11 +45,16 @@ export default function AnalyticsView({ storeId }) {
     const [from, to] = presetRange('month30');
     return { from, to };
   });
+  // Два взгляда на один период: «Обзор» - про заказы и деньги целиком, «Продажи» -
+  // про товар. Период общий, грузим только открытую вкладку: каждый запрос - это
+  // несколько проходов по таблице заказов, и считать невидимое незачем.
+  const [tab, setTab] = useState('overview');
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
   const load = useCallback(async () => {
+    if (tab !== 'overview') return;
     setLoading(true);
     setError(null);
     try {
@@ -61,9 +67,36 @@ export default function AnalyticsView({ storeId }) {
     } finally {
       setLoading(false);
     }
-  }, [range.from, range.to, storeId]);
+  }, [range.from, range.to, storeId, tab]);
 
   useEffect(() => { load(); }, [load]);
+
+  const periodBar = (
+    <div className="period-bar">
+      <PeriodPicker
+        from={range.from}
+        to={range.to}
+        onChange={(from, to) => setRange({ from: from || range.from, to: to || range.to })}
+      />
+      <div className="chip-row">
+        <button className="chip" data-active={tab === 'overview'} onClick={() => setTab('overview')}>Обзор</button>
+        <button className="chip" data-active={tab === 'sales'} onClick={() => setTab('sales')}>Продажи</button>
+      </div>
+      <span className="eyebrow">
+        {rangeLabel(range.from, range.to)}
+        {loading && tab === 'overview' && ' · обновляем'}
+      </span>
+    </div>
+  );
+
+  if (tab === 'sales') {
+    return (
+      <div className="analytics">
+        {periodBar}
+        <SalesView range={range} storeId={storeId} />
+      </div>
+    );
+  }
 
   if (error) {
     return (
@@ -84,17 +117,7 @@ export default function AnalyticsView({ storeId }) {
 
   return (
     <div className="analytics">
-      <div className="period-bar">
-        <PeriodPicker
-          from={range.from}
-          to={range.to}
-          onChange={(from, to) => setRange({ from: from || range.from, to: to || range.to })}
-        />
-        <span className="eyebrow">
-          {rangeLabel(data.range.from, data.range.to)}
-          {loading && ' · обновляем'}
-        </span>
-      </div>
+      {periodBar}
 
       <div className="kpi-grid" style={{ marginBottom: 20 }}>
         <div className="kpi">

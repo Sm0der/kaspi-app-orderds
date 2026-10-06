@@ -839,3 +839,55 @@ table.data tbody tr:last-child td { border-bottom: 0; }
 .period-summary-figures .figure-label {
   display: block; font-size: 12px; color: var(--text-soft); margin-top: 2px;
 }
+
+/* ───── Продажи ─────
+   Место на карточке Kaspi - главная цифра раздела, поэтому не просто число в ячейке,
+   а значок: первые три места покупатель видит сразу, дальше надо разворачивать список
+   продавцов, а «нас нет» означает, что товар не показывают вообще. Раскраска идёт
+   смысловыми цветами, а не латунью - латунь здесь означала бы «выбрано». */
+.place {
+  display: inline-flex; align-items: baseline; gap: 4px; white-space: nowrap;
+  padding: 2px 8px; border-radius: var(--radius-sm);
+  font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums;
+  border: 1px solid var(--line); color: var(--text);
+}
+.place .place-of { font-size: 11.5px; font-weight: 500; color: var(--text-faint); }
+.place[data-tone='top'] { border-color: var(--sage); color: var(--sage); }
+.place[data-tone='mid'] { border-color: var(--line-strong); color: var(--text-dim); }
+.place[data-tone='low'] { border-color: var(--amber); color: var(--amber); }
+.place-out { border-color: var(--red); color: var(--red); font-weight: 600; }
+
+/* Рост и падение. Стрелку не рисуем: знак перед числом читается и в чёрно-белой печати */
+.trend { font-variant-numeric: tabular-nums; font-weight: 600; }
+.trend[data-dir='up'] { color: var(--sage); }
+.trend[data-dir='down'] { color: var(--red); }
+.trend[data-dir='flat'] { color: var(--text-faint); }
+
+/* Убыток и «дороже рынка» - те же деньги, что уходят, поэтому один цвет */
+[data-loss] { color: var(--red); font-weight: 600; }
+
+/* Доля категории: число и полоска под ним в одной ячейке, чтобы глаз ловил
+   соотношение, не читая процентов. Полоска - фон, а не отдельный элемент:
+   так она не ломает выравнивание чисел по правому краю. */
+.share-bar {
+  display: inline-block; padding: 1px 6px; border-radius: var(--radius-sm);
+  background: linear-gradient(to right, var(--brass-wash) var(--fill), transparent var(--fill));
+}
+
+table.data tbody tr[data-selected] { background: var(--brass-wash); }
+
+/* Кандидаты на снятие - карточки, а не строки таблицы: у каждой свой список причин
+   произвольной длины, и в ячейку он не ложится. */
+.drop-list { display: grid; gap: 10px; }
+.drop-card {
+  border: 1px solid var(--line); border-left: 3px solid var(--amber);
+  border-radius: var(--radius-sm); padding: 12px 14px;
+}
+.drop-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.drop-name { font-weight: 600; line-height: 1.3; }
+.drop-why { margin: 10px 0 0; padding-left: 18px; display: grid; gap: 4px; font-size: 13px; }
+.drop-why li { color: var(--text-dim); }
+
+/* Пока считается новый период, старые цифры остаются на месте приглушёнными -
+   иначе экран мигает пустотой на каждый клик по пресету. */
+.is-reloading { opacity: 0.55; transition: opacity 0.15s var(--ease); }
