@@ -793,12 +793,14 @@ function ProductRow({ row, open, onToggle }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {row.rows.map(({ order, quantity }) => {
+                  {row.rows.map(({ order, quantity }, index) => {
                     const stage = stageOf(order.stage);
                     const urgency = urgencyOf(order.urgency);
                     const ship = shipmentLabel(order.shipment_plan_ms, order.shipment_fact_ms);
                     return (
-                      <tr key={order.id}>
+                      // Один артикул изредка приходит в заказе двумя строками -
+                      // тогда и строк здесь две, поэтому к ключу нужен номер
+                      <tr key={`${order.id}:${index}`}>
                         <td>
                           <div className="order-code">{order.order_code || order.kaspi_order_id}</div>
                           <div className="eyebrow" style={{ marginTop: 3 }}>{order.store_name}</div>
