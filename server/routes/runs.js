@@ -3,7 +3,7 @@ const router = express.Router();
 const archiver = require('archiver');
 const axios = require('axios');
 const db = require('../db/init');
-const { refreshStamps } = require('../services/waybillStamps');
+const { refreshStamps, countPending } = require('../services/waybillStamps');
 
 // Вывозы, восстановленные по времени формирования накладных.
 //
@@ -106,21 +106,12 @@ router.get('/', async (req, res, next) => {
     const orders = await loadStamped(days);
     const runs = groupIntoRuns(orders).reverse(); // свежие сверху
 
-    // Сколько накладных ещё не прочитано - чтобы интерфейс мог честно сказать
-    // «показаны не все» и предложить дочитать
-    const pending = await db.query(
-      // Перечисляем рабочие стадии вместо NOT IN ('cancelled','delivered','completed'):
-      // список стадий закрыт, так что это то же множество, но по нему работает индекс.
-      // С NOT IN Postgres перебирал все 39 тысяч строк, распаковывая jsonb на каждой,
-      // и один этот счётчик занимал несколько секунд.
-      `SELECT COUNT(*)::int AS n FROM orders
-       WHERE stage IN ('new', 'accepted', 'packed', 'shipping')
-         AND raw_data->'attributes'->'kaspiDelivery'->>'waybill' IS NOT NULL
-         AND (waybill_made_at IS NULL
-              OR waybill_stamped_number IS DISTINCT FROM raw_data->'attributes'->'kaspiDelivery'->>'waybillNumber')`
-    );
+    // Непрочитанные делим на две кучи: те, что ещё можно дочитать кнопкой, и те, по
+    // которым Kaspi уже не отдаст накладную (уехали). Раньше они шли одним числом, и
+    // интерфейс звал нажать кнопку, которая по ним ничего сделать не могла.
+    const { remaining, lost } = await countPending();
 
-    res.json({ data: runs, pending: pending.rows[0].n });
+    res.json({ data: runs, pending: remaining, lost });
   } catch (error) {
     next(error);
   }

@@ -207,6 +207,13 @@ ALTER TABLE orders ADD COLUMN IF NOT EXISTS waybill_made_at TIMESTAMPTZ;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS waybill_stamped_number VARCHAR(50);
 CREATE INDEX IF NOT EXISTS idx_orders_waybill_made_at ON orders(waybill_made_at);
 
+-- Когда мы последний раз не смогли прочитать штамп. Нужна, потому что окно для чтения
+-- закрывается: накладную Kaspi отдаёт, пока заказ лежит на складе, а после передачи
+-- курьеру на тот же адрес приходит 404 - навсегда. Без этой отметки такие заказы
+-- перечитывались при каждом нажатии «Прочитать», счётчик не менялся, и кнопка
+-- выглядела сломанной, хотя честно отработала.
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS waybill_stamp_failed_at TIMESTAMPTZ;
+
 -- Миграция: хеш присланного Kaspi JSON заказа. У Kaspi нет фильтра "изменённые с ...",
 -- он всегда отдаёт все заказы за 14 дней, поэтому изменившиеся мы вычисляем сами -
 -- сравнением хеша. Без этого каждая синхронизация переписывала все ~1300 заказов,

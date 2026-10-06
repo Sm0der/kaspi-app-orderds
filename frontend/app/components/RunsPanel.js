@@ -22,6 +22,7 @@ const DAY_LABEL = (day) => {
 export default function RunsPanel() {
   const [runs, setRuns] = useState([]);
   const [pending, setPending] = useState(0);
+  const [lost, setLost] = useState(0);
   const [loading, setLoading] = useState(true);
   const [reading, setReading] = useState(false);
   const [busyKey, setBusyKey] = useState(null);
@@ -34,6 +35,7 @@ export default function RunsPanel() {
       const { data } = await api.get('/api/runs', { params: { days } });
       setRuns(data.data || []);
       setPending(data.pending || 0);
+      setLost(data.lost || 0);
       setError(null);
     } catch (err) {
       setError(errorText(err, 'Не удалось загрузить вывозы'));
@@ -45,7 +47,10 @@ export default function RunsPanel() {
   useEffect(() => { load(); }, [load]);
 
   // Штампы читаются пачками: на каждую накладную это два обращения к Kaspi, и всё сразу
-  // в один запрос не уложится. Повторяем, пока сервер не скажет, что непрочитанных нет.
+  // в один запрос не уложится. Повторяем, пока счётчик падает - и останавливаемся, как
+  // только подход не сдвинул его с места. Раньше условием было «пока остаток больше
+  // нуля», и на заказах, которые Kaspi уже не отдаёт, цикл делал двадцать холостых
+  // подходов по шестьдесят заказов: несколько минут ожидания и та же плашка в конце.
   const readStamps = async () => {
     setReading(true);
     setError(null);
@@ -54,6 +59,8 @@ export default function RunsPanel() {
       let guard = 0;
       while (left > 0 && guard < 20) {
         const { data } = await api.post('/api/runs/refresh', { limit: 60 });
+        setLost(data.lost || 0);
+        if (data.remaining >= left) { left = data.remaining; setPending(left); break; }
         left = data.remaining;
         setPending(left);
         guard += 1;
@@ -105,16 +112,26 @@ export default function RunsPanel() {
 
       {error && <div className="panel-body"><div className="alert alert-error">{error}</div></div>}
 
-      {pending > 0 && (
-        <div className="panel-body" style={{ paddingBottom: 0 }}>
-          <div className="alert alert-note" style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-            <span>
-              У {pending} накладных время формирования ещё не прочитано — эти заказы в списке не учтены.
-            </span>
-            <button className="btn btn-sm btn-primary" onClick={readStamps} disabled={reading}>
-              {reading && <span className="spinner" />} {reading ? 'Читаем' : 'Прочитать'}
-            </button>
-          </div>
+      {(pending > 0 || lost > 0) && (
+        <div className="panel-body" style={{ paddingBottom: 0, display: 'grid', gap: 10 }}>
+          {pending > 0 && (
+            <div className="alert alert-note" style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+              <span>
+                У {pending} накладных время формирования ещё не прочитано — эти заказы в списке не учтены.
+              </span>
+              <button className="btn btn-sm btn-primary" onClick={readStamps} disabled={reading}>
+                {reading && <span className="spinner" />} {reading ? 'Читаем' : 'Прочитать'}
+              </button>
+            </div>
+          )}
+          {lost > 0 && (
+            <div className="alert">
+              {pending > 0 ? 'Ещё ' : ''}{lost} заказов уехало раньше, чем мы заглянули в их накладные: Kaspi отдаёт файл,
+              пока заказ на складе, а после передачи курьеру отвечает «не найдено». Время формирования
+              по ним восстановить уже нечем, в рейсы они не попадут. Чтобы такое не копилось,
+              читайте штампы в день отгрузки.
+            </div>
+          )}
         </div>
       )}
 
