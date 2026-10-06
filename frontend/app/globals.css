@@ -891,3 +891,27 @@ table.data tbody tr[data-selected] { background: var(--brass-wash); }
 /* Пока считается новый период, старые цифры остаются на месте приглушёнными -
    иначе экран мигает пустотой на каждый клик по пресету. */
 .is-reloading { opacity: 0.55; transition: opacity 0.15s var(--ease); }
+
+/* Раскрытый товар в сводке отгрузки: заказы, в которых он едет. Вложенная таблица
+   отбита слева той же линией, что и состав заказа - глаз сразу видит, что это
+   подробности строки выше, а не ещё один самостоятельный список. */
+.product-orders {
+  padding: 2px 0 6px 14px;
+  border-left: 2px solid var(--line-strong);
+  overflow-x: auto;
+}
+.product-orders table.data { font-size: 13px; }
+.product-orders table.data th { font-size: 10.5px; padding-top: 6px; padding-bottom: 6px; }
+.product-orders table.data td { padding: 8px 12px; }
+.product-orders table.data tbody tr:hover { background: transparent; }
+
+/* Треугольник раскрытия. Поворачивается, а не меняет символ: так строка не дёргается
+   по ширине, когда её открывают и закрывают. */
+.disclosure {
+  display: inline-block;
+  width: 14px;
+  margin-right: 4px;
+  color: var(--text-faint);
+  transition: transform 0.14s var(--ease);
+}
+.disclosure[data-open] { transform: rotate(90deg); color: var(--brass-strong); }

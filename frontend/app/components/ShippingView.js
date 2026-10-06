@@ -22,6 +22,9 @@ export default function ShippingView({ orders, summary, loading, filters, setFil
   const [stage, setStage] = useState(null);
   const [urgency, setUrgency] = useState(null);
   const [expanded, setExpanded] = useState(null);
+  // Какой товар в сводке раскрыт: владелец видит «10 шкафов Comfort 4D» и первым делом
+  // спрашивает, в каких они заказах и когда их везти.
+  const [openProduct, setOpenProduct] = useState(null);
   const [error, setError] = useState(null);
 
   const listRef = useRef(null);
@@ -227,11 +230,23 @@ export default function ShippingView({ orders, summary, loading, filters, setFil
     for (const order of visible) {
       for (const item of order.items || []) {
         const key = item.sku || item.name;
-        if (!map.has(key)) map.set(key, { name: item.name, sku: item.sku, quantity: 0, orders: 0 });
+        if (!map.has(key)) {
+          map.set(key, { key, name: item.name, sku: item.sku, imageUrl: null, quantity: 0, orders: 0, rows: [] });
+        }
         const row = map.get(key);
         row.quantity += Number(item.quantity) || 1;
         row.orders += 1;
+        // Картинка у позиций одного артикула одна и та же, но приходит не в каждой
+        // строке - берём первую непустую, иначе у половины товаров был бы пустой квадрат.
+        if (!row.imageUrl && item.imageUrl) row.imageUrl = item.imageUrl;
+        row.rows.push({ order, quantity: Number(item.quantity) || 1 });
       }
+    }
+    // Внутри товара заказы по сроку отгрузки: сверху то, что уезжает раньше.
+    // Без плана (null) - в конец, иначе они закрывают собой срочное.
+    const far = Number.MAX_SAFE_INTEGER;
+    for (const row of map.values()) {
+      row.rows.sort((a, b) => (a.order.shipment_plan_ms || far) - (b.order.shipment_plan_ms || far));
     }
     return [...map.values()].sort((a, b) => b.quantity - a.quantity);
   }, [visible]);
@@ -624,12 +639,13 @@ export default function ShippingView({ orders, summary, loading, filters, setFil
         <section className="panel rise" style={{ marginBottom: 22 }}>
           <div className="panel-head">
             <h2>Товары в отобранных заказах</h2>
-            <span className="eyebrow">{visible.length} заказов</span>
+            <span className="eyebrow">{visible.length} заказов · нажмите строку</span>
           </div>
           <div className="table-wrap">
             <table className="data">
               <thead>
                 <tr>
+                  <th style={{ width: 52 }}>Фото</th>
                   <th>Товар</th>
                   <th>Артикул</th>
                   <th style={{ textAlign: 'right' }}>Штук</th>
@@ -638,12 +654,12 @@ export default function ShippingView({ orders, summary, loading, filters, setFil
               </thead>
               <tbody>
                 {productSummary.map((row) => (
-                  <tr key={row.sku || row.name}>
-                    <td>{row.name || '—'}</td>
-                    <td className="num t-dim">{row.sku || '—'}</td>
-                    <td className="num" style={{ textAlign: 'right', fontWeight: 600 }}>{row.quantity}</td>
-                    <td className="num t-dim" style={{ textAlign: 'right' }}>{row.orders}</td>
-                  </tr>
+                  <ProductRow
+                    key={row.key}
+                    row={row}
+                    open={openProduct === row.key}
+                    onToggle={() => setOpenProduct(openProduct === row.key ? null : row.key)}
+                  />
                 ))}
               </tbody>
             </table>
@@ -741,6 +757,85 @@ function Kpi({ value, label, accent, active, onClick, hint }) {
       <div className="kpi-value">{value}</div>
       <div className="kpi-label">{label}</div>
     </button>
+  );
+}
+
+// Строка товара в сводке. Раскрывается в список заказов, где этот товар едет: владелец
+// видит «10 штук» и сразу спрашивает, в каких они заказах и когда их везти. Раньше за
+// этим приходилось идти в список заказов и искать название глазами.
+function ProductRow({ row, open, onToggle }) {
+  return (
+    <>
+      <tr className="order-row" onClick={onToggle} data-selected={open || undefined}>
+        <td><Thumb src={row.imageUrl} alt={row.name} size="sm" /></td>
+        <td>
+          <span className="disclosure" data-open={open || undefined}>▸</span>
+          {row.name || '—'}
+        </td>
+        <td className="num t-dim">{row.sku || '—'}</td>
+        <td className="num" style={{ textAlign: 'right', fontWeight: 600 }}>{row.quantity}</td>
+        <td className="num t-dim" style={{ textAlign: 'right' }}>{row.orders}</td>
+      </tr>
+      {open && (
+        <tr>
+          <td colSpan={5} style={{ paddingTop: 0 }}>
+            <div className="product-orders">
+              <table className="data">
+                <thead>
+                  <tr>
+                    <th>Заказ</th>
+                    <th>Этап</th>
+                    <th>Город</th>
+                    <th>Отгрузка</th>
+                    <th>Доставка</th>
+                    <th style={{ textAlign: 'right' }}>Шт</th>
+                    <th style={{ textAlign: 'right' }}>Сумма заказа</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {row.rows.map(({ order, quantity }) => {
+                    const stage = stageOf(order.stage);
+                    const urgency = urgencyOf(order.urgency);
+                    const ship = shipmentLabel(order.shipment_plan_ms, order.shipment_fact_ms);
+                    return (
+                      <tr key={order.id}>
+                        <td>
+                          <div className="order-code">{order.order_code || order.kaspi_order_id}</div>
+                          <div className="eyebrow" style={{ marginTop: 3 }}>{order.store_name}</div>
+                        </td>
+                        <td>
+                          <span className="badge" style={{ background: 'var(--ink-700)', borderColor: 'var(--line)' }}>
+                            <span className="dot" style={{ background: stage.color }} />
+                            {stage.short}
+                          </span>
+                          {urgency && ['new', 'accepted', 'packed'].includes(order.stage) && (
+                            <div style={{ marginTop: 5, fontSize: 11.5, color: urgency.color }}>{urgency.label}</div>
+                          )}
+                        </td>
+                        <td className="t-dim">
+                          {order.town || '—'}
+                          {order.customer_name && (
+                            <div className="eyebrow" style={{ marginTop: 3, textTransform: 'none', letterSpacing: 0 }}>
+                              {order.customer_name}{order.customer_last_name ? ` ${order.customer_last_name}.` : ''}
+                            </div>
+                          )}
+                        </td>
+                        <td className="num" style={{ color: TONE_COLOR[ship.tone] }}>{ship.text}</td>
+                        <td className="num t-dim">
+                          {order.delivery_date ? new Date(order.delivery_date).toLocaleDateString('ru-RU') : '—'}
+                        </td>
+                        <td className="num" style={{ textAlign: 'right', fontWeight: 600 }}>{quantity}</td>
+                        <td className="num t-dim" style={{ textAlign: 'right' }}>{formatMoney(order.total_price)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
   );
 }
 
