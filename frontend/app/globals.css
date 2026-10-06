@@ -807,3 +807,35 @@ table.data tbody tr:last-child td { border-bottom: 0; }
   .kpi-value { font-size: 25px; }
   .column { flex-basis: 268px; }
 }
+
+/* ── Выбор периода: один и тот же в «Аналитике» и «Заказах» ───────── */
+.period-picker { display: flex; flex-direction: column; gap: 8px; }
+.period-dates { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.period-dates .input { width: auto; min-width: 148px; }
+.period-dates label { font-size: 12px; color: var(--text-soft); }
+
+/* Шапка «Аналитики»: пресеты слева, подпись выбранного периода справа */
+.period-bar {
+  display: flex; gap: 16px; align-items: flex-start; justify-content: space-between;
+  flex-wrap: wrap; margin-bottom: 16px;
+}
+.period-bar .eyebrow { align-self: center; white-space: nowrap; }
+
+.field-wide { flex: 1 1 100%; }
+
+/* Итог за период в «Заказах» - то, ради чего период и выбирают */
+.period-summary { margin-bottom: 18px; }
+.period-summary-head {
+  display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 14px;
+}
+.period-summary-head h2 { margin: 0; font-size: 16px; }
+.period-summary-figures {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px;
+}
+.period-summary-figures .figure {
+  display: block; font-size: 24px; font-weight: 600; line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+}
+.period-summary-figures .figure-label {
+  display: block; font-size: 12px; color: var(--text-soft); margin-top: 2px;
+}

@@ -464,10 +464,19 @@ router.get('/assemble-preview', async (req, res, next) => {
   }
 });
 
+// Сколько карточек заказов отдаём за выбранный период: больше тысячи на экране
+// всё равно не читают, а браузер на них заметно тормозит.
+const SUMMARY_LIMIT = 1000;
+
 // GET /api/orders/summary - Получить сводку заказов (все активные + в доставке + недавно завершённые)
 router.get('/summary', async (req, res, next) => {
   try {
     const { storeId, product, dateFrom, dateTo, orderDateFrom, orderDateTo } = req.query;
+
+    // Владелец выбрал период в календаре - значит он хочет именно его, целиком, включая
+    // давно завершённые заказы. Без этого нельзя было спросить «сколько отработали за
+    // март»: сводка всегда подмешивала только свежее и показывала почти пустой экран.
+    const explicitPeriod = Boolean(orderDateFrom || orderDateTo);
 
     // Показываем незавершённые заказы (new/accepted/packed/shipping) всегда,
     // а завершённые/отменённые - только недавние.
@@ -478,7 +487,7 @@ router.get('/summary', async (req, res, next) => {
     // проставила 36 тысячам архивных строк сегодняшний updated_at - и сводка, вместо двух
     // сотен рабочих заказов, начала тянуть всю таблицу с позициями, по полминуты на запрос.
     // order_date такому не подвержен: он всегда настоящий день заказа.
-    const whereClauses = [
+    const whereClauses = explicitPeriod ? [] : [
       `(o.stage IN ('new', 'accepted', 'packed', 'shipping') OR o.order_date >= NOW() - INTERVAL '14 days')`
     ];
     const params = [];
@@ -565,9 +574,32 @@ router.get('/summary', async (req, res, next) => {
           WHEN 'shipping' THEN 3 WHEN 'completed' THEN 4 ELSE 5
         END,
         o.urgency ASC, o.ship_date ASC NULLS LAST, o.delivery_date ASC
+      ${explicitPeriod ? `LIMIT ${SUMMARY_LIMIT}` : ''}
     `, params);
 
     const orders = result.rows;
+
+    // За выбранный период заказов бывает и несколько тысяч - все карточки на экран не
+    // нужны и браузер от них встанет. Поэтому список режем, а счётчики считаем отдельным
+    // запросом по всему периоду: владелец спрашивал именно «сколько отработали», и это
+    // число должно быть настоящим, а не длиной показанного списка.
+    let periodTotals = null;
+    if (explicitPeriod) {
+      const counts = await db.query(`
+        SELECT COUNT(*)::int AS total,
+               COUNT(*) FILTER (WHERE o.stage = 'new')::int AS new,
+               COUNT(*) FILTER (WHERE o.stage = 'accepted')::int AS accepted,
+               COUNT(*) FILTER (WHERE o.stage = 'packed')::int AS packed,
+               COUNT(*) FILTER (WHERE o.stage = 'shipping')::int AS shipping,
+               COUNT(*) FILTER (WHERE o.stage = 'completed')::int AS completed,
+               COUNT(*) FILTER (WHERE o.stage = 'cancelled')::int AS cancelled,
+               COALESCE(SUM((o.raw_data->'attributes'->>'totalPrice')::numeric)
+                        FILTER (WHERE o.stage <> 'cancelled'), 0)::numeric AS revenue
+        FROM orders o
+        WHERE ${whereClauses.join(' AND ')}
+      `, params.slice(0, params.length));
+      periodTotals = counts.rows[0];
+    }
 
     // Статистика по этапам, по всем и по магазинам
     const storeStats = {};
@@ -605,10 +637,38 @@ router.get('/summary', async (req, res, next) => {
       if (order.urgency === 'overdue') totalStats.overdue++;
     });
 
+    // При выбранном периоде отдаём настоящие счётчики, а не пересчитанные по срезу
+    if (periodTotals) {
+      totalStats = {
+        ...totalStats,
+        total: periodTotals.total,
+        new: periodTotals.new,
+        accepted: periodTotals.accepted,
+        packed: periodTotals.packed,
+        shipping: periodTotals.shipping,
+        completed: periodTotals.completed,
+        cancelled: periodTotals.cancelled,
+      };
+    }
+
     res.json({
       total: totalStats,
       byStore: storeStats,
-      orders: orders
+      orders: orders,
+      period: periodTotals
+        ? {
+            from: orderDateFrom || null,
+            to: orderDateTo || null,
+            orders: periodTotals.total,
+            sold: periodTotals.total - periodTotals.cancelled,
+            cancelled: periodTotals.cancelled,
+            revenue: Math.round(Number(periodTotals.revenue)),
+            // Сколько карточек реально показано: если список обрезан, интерфейс
+            // должен сказать об этом, а не делать вид, что это всё.
+            shown: orders.length,
+            truncated: orders.length >= SUMMARY_LIMIT,
+          }
+        : null,
     });
   } catch (error) {
     next(error);

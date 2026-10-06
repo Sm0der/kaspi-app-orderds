@@ -13,26 +13,12 @@ import AnalyticsView from './components/AnalyticsView';
 import FinanceView from './components/FinanceView';
 import AdminPanel from './components/AdminPanel';
 
-const EMPTY_FILTERS = { product: '', dateFrom: '', dateTo: '', createdPreset: 'all' };
+const EMPTY_FILTERS = { product: '', dateFrom: '', dateTo: '', createdFrom: '', createdTo: '' };
 
 const toISO = (date) => date.toISOString().slice(0, 10);
 
 // Пресеты «новых заказов» считаются по дате создания заказа в Kaspi (order_date),
 // а не по дате доставки — это разные вещи, и фильтры для них тоже разные.
-function createdRange(preset) {
-  const today = new Date();
-
-  if (preset === 'today') return [toISO(today), toISO(today)];
-  if (preset === 'yesterday') {
-    const yesterday = new Date(today);
-    yesterday.setDate(yesterday.getDate() - 1);
-    return [toISO(yesterday), toISO(yesterday)];
-  }
-  if (preset === 'month') {
-    return [toISO(new Date(today.getFullYear(), today.getMonth(), 1)), toISO(today)];
-  }
-  return [null, null];
-}
 
 // Заказы и накладные - для владельца и менеджера. Упаковщик, кладовщик или рабочий цеха
 // входит той же учёткой, но здесь ему делать нечего, поэтому сразу уводим на склад.
@@ -137,9 +123,8 @@ function Workspace({ onLogout }) {
       if (filters.dateFrom) params.dateFrom = filters.dateFrom;
       if (filters.dateTo) params.dateTo = filters.dateTo;
 
-      const [createdFrom, createdTo] = createdRange(filters.createdPreset);
-      if (createdFrom) params.orderDateFrom = createdFrom;
-      if (createdTo) params.orderDateTo = createdTo;
+      if (filters.createdFrom) params.orderDateFrom = filters.createdFrom;
+      if (filters.createdTo) params.orderDateTo = filters.createdTo;
 
       const { data } = await api.get('/api/orders/summary', { params });
       setSummary(data);

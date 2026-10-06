@@ -2,26 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, errorText } from '../lib/api';
+import PeriodPicker, { presetRange, rangeLabel } from './PeriodPicker';
 
 // Аналитика владельца: деньги, логистика и выработка людей за выбранный период.
 // Раздел только читает - ничего не формирует и не меняет, поэтому его можно открывать
 // в разгар отгрузки, ничего не сломав.
 
 const money = (v) => (v === null || v === undefined ? '—' : Math.round(Number(v)).toLocaleString('ru-RU'));
-const PERIODS = [
-  { days: 7, label: 'Неделя' },
-  { days: 30, label: 'Месяц' },
-  { days: 90, label: 'Квартал' },
-  { days: 365, label: 'Год' },
-];
-
-// День по Алматы: считать период по часовому поясу браузера нельзя - у владельца он
-// алматинский, а у сервера на Vercel UTC, и «сегодня» разъезжается на день по вечерам.
-function almatyDay(offset = 0) {
-  const shifted = new Date(Date.now() + 5 * 3600000 - offset * 86400000);
-  return shifted.toISOString().slice(0, 10);
-}
-
 // Минимум пикселей на подпись даты: «18.08» занимает около 26, остальное - воздух
 const TICK_SPACE = 52;
 
@@ -51,7 +38,12 @@ function byCalendar(rows, from, to, field) {
 }
 
 export default function AnalyticsView({ storeId }) {
-  const [days, setDays] = useState(30);
+  // Период живёт одной парой дат, а не числом дней: так его можно выбрать календарём
+  // и так же задать в «Заказах» - вопрос «что было с 1 по 15 марта» один и тот же.
+  const [range, setRange] = useState(() => {
+    const [from, to] = presetRange('month30');
+    return { from, to };
+  });
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -60,7 +52,7 @@ export default function AnalyticsView({ storeId }) {
     setLoading(true);
     setError(null);
     try {
-      const params = { from: almatyDay(days - 1), to: almatyDay(0) };
+      const params = { from: range.from, to: range.to };
       if (storeId) params.store = storeId;
       const { data: body } = await api.get('/api/analytics/overview', { params });
       setData(body);
@@ -69,7 +61,7 @@ export default function AnalyticsView({ storeId }) {
     } finally {
       setLoading(false);
     }
-  }, [days, storeId]);
+  }, [range.from, range.to, storeId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -92,14 +84,14 @@ export default function AnalyticsView({ storeId }) {
 
   return (
     <div className="analytics">
-      <div className="chip-row" style={{ marginBottom: 16 }}>
-        {PERIODS.map((p) => (
-          <button key={p.days} className="chip" data-active={days === p.days} onClick={() => setDays(p.days)}>
-            {p.label}
-          </button>
-        ))}
-        <span className="eyebrow" style={{ marginLeft: 'auto', alignSelf: 'center' }}>
-          {dayLabel(data.range.from)} — {dayLabel(data.range.to)}
+      <div className="period-bar">
+        <PeriodPicker
+          from={range.from}
+          to={range.to}
+          onChange={(from, to) => setRange({ from: from || range.from, to: to || range.to })}
+        />
+        <span className="eyebrow">
+          {rangeLabel(data.range.from, data.range.to)}
           {loading && ' · обновляем'}
         </span>
       </div>

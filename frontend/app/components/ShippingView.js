@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, downloadFile, errorText } from '../lib/api';
+import PeriodPicker, { rangeLabel } from './PeriodPicker';
 import {
   STAGES, STAGE_ORDER, stageOf, urgencyOf,
   shipmentLabel, isShippingToday, formatMoney, totalQuantity
@@ -255,9 +256,10 @@ export default function ShippingView({ orders, summary, loading, filters, setFil
 
   const total = summary?.total ?? {};
   const setDate = (key) => (event) => setFilters((prev) => ({ ...prev, [key]: event.target.value }));
-  const setCreated = (preset) => setFilters((prev) => ({ ...prev, createdPreset: preset }));
+  const setCreatedRange = (from, to) =>
+    setFilters((prev) => ({ ...prev, createdFrom: from || '', createdTo: to || '' }));
 
-  const filtersDirty = filters.product || filters.dateFrom || filters.dateTo || filters.createdPreset !== 'all';
+  const filtersDirty = filters.product || filters.dateFrom || filters.dateTo || filters.createdFrom || filters.createdTo;
 
   return (
     <>
@@ -353,15 +355,15 @@ export default function ShippingView({ orders, summary, loading, filters, setFil
 
         <div className="divider" />
 
-        <div className="field">
-          <label>Новые заказы</label>
-          <div className="chip-row">
-            {[['all', 'Все'], ['today', 'Сегодня'], ['yesterday', 'Вчера'], ['month', 'Месяц']].map(([key, label]) => (
-              <button key={key} className="chip" data-active={filters.createdPreset === key} onClick={() => setCreated(key)}>
-                {label}
-              </button>
-            ))}
-          </div>
+        <div className="field field-wide">
+          <label title="Период по дате оформления заказа в Kaspi">Заказы за период</label>
+          <PeriodPicker
+            from={filters.createdFrom || null}
+            to={filters.createdTo || null}
+            onChange={setCreatedRange}
+            allowEmpty
+            label="с"
+          />
         </div>
 
         {filtersDirty && (
@@ -369,7 +371,7 @@ export default function ShippingView({ orders, summary, loading, filters, setFil
             className="btn btn-quiet btn-sm"
             onClick={() => {
               setProductInput('');
-              setFilters({ product: '', dateFrom: '', dateTo: '', createdPreset: 'all' });
+              setFilters({ product: '', dateFrom: '', dateTo: '', createdFrom: '', createdTo: '' });
             }}
           >
             Сбросить
@@ -378,6 +380,44 @@ export default function ShippingView({ orders, summary, loading, filters, setFil
       </div>
 
       {error && <div className="alert alert-error">{error}</div>}
+
+      {/* Итог за выбранный период: ровно тот ответ, за которым сюда приходят -
+          сколько заказов отработали. Счётчики приходят с сервера по всему периоду,
+          а не считаются по показанным карточкам: список при длинном периоде обрезан. */}
+      {summary?.period && (
+        <section className="panel rise period-summary">
+          <div className="panel-body">
+            <div className="period-summary-head">
+              <h2>Заказы за период</h2>
+              <span className="eyebrow">{rangeLabel(summary.period.from, summary.period.to)}</span>
+            </div>
+            <div className="period-summary-figures">
+              <div>
+                <span className="figure">{summary.period.orders.toLocaleString('ru-RU')}</span>
+                <span className="figure-label">всего заказов</span>
+              </div>
+              <div>
+                <span className="figure">{summary.period.sold.toLocaleString('ru-RU')}</span>
+                <span className="figure-label">отработали</span>
+              </div>
+              <div>
+                <span className="figure">{summary.period.cancelled.toLocaleString('ru-RU')}</span>
+                <span className="figure-label">отменено</span>
+              </div>
+              <div>
+                <span className="figure">{Math.round(summary.period.revenue).toLocaleString('ru-RU')} ₸</span>
+                <span className="figure-label">выручка</span>
+              </div>
+            </div>
+            {summary.period.truncated && (
+              <p className="t-dim" style={{ marginTop: 10 }}>
+                Цифры — за весь период. Ниже показаны первые {summary.period.shown.toLocaleString('ru-RU')} заказов,
+                чтобы страница не встала: сузьте период, если нужен весь список.
+              </p>
+            )}
+          </div>
+        </section>
+      )}
 
       {/* ── Рабочие панели ─────────────────────────────────────────── */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: 16, marginBottom: 22 }}>
