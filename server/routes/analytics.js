@@ -237,7 +237,7 @@ router.get('/sales', async (req, res, next) => {
     const shift = (day, by) => new Date(Date.parse(day) - by * 86400000).toISOString().slice(0, 10);
     const prevArgs = [shift(from, days), shift(from, 1), store];
 
-    const [categories, prevCategories, items, prevItems, ranks, costs] = await Promise.all([
+    const [categories, prevCategories, items, prevItems, ranks, costs, cardStats] = await Promise.all([
       categoryRows(args),
       categoryRows(prevArgs),
       itemRows(args),
@@ -250,6 +250,9 @@ router.get('/sales', async (req, res, next) => {
         [store]
       ),
       costPerProduct(),
+      // Берём оба магазина даже при фильтре по одному: карточку они делят между собой,
+      // и доля «сколько досталось нам» складывается из двух строк.
+      latestCardStats(null),
     ]);
 
     const prevCat = new Map(prevCategories.rows.map((r) => [r.category, Number(r.revenue)]));
@@ -270,6 +273,22 @@ router.get('/sales', async (req, res, next) => {
     };
     const prevByCard = sumByCard(prevItems.rows);
     const nowByCard = sumByCard(items.rows);
+
+    // Клики и доля в карточке - из отчёта кабинета, по номеру карточки и магазину
+    const statsByCard = new Map(cardStats.map((r) => [`${r.store_id}:${r.card_id}`, r]));
+    const statsPeriod = cardStats.length
+      ? { from: cardStats[0].period_from, to: cardStats[0].period_to }
+      : null;
+
+    // Доля карточки, сложенная по нашим магазинам. Kaspi считает её на магазин, а мы
+    // на одной карточке стоим дважды: у Aisha Pro 1103 это 11% у КухниKZ и 26% у
+    // ART ROOM - по отдельности каждая выглядит провалом, вместе это 37% и бестселлер.
+    // Судить «покупают у других» можно только по сумме.
+    const ourShareByCard = new Map();
+    for (const r of cardStats) {
+      if (r.card_share === null) continue;
+      ourShareByCard.set(r.card_id, (ourShareByCard.get(r.card_id) || 0) + Number(r.card_share));
+    }
 
     const totalRevenue = categories.rows.reduce((sum, r) => sum + Number(r.revenue), 0);
 
@@ -340,6 +359,26 @@ router.get('/sales', async (req, res, next) => {
         qtyChange: changeFrom > 0 ? Math.round(((changeTo - changeFrom) / changeFrom) * 1000) / 10 : null,
         // Сравнение сделано по карточке, а не по артикулу - интерфейс это подписывает
         movedBetweenStores: moved,
+        traffic: (() => {
+          const st = r.card_id ? statsByCard.get(`${r.store_id}:${r.card_id}`) : null;
+          if (!st) return null;
+          return {
+            clicks: st.clicks,
+            sold: st.sold,
+            // Сколько из ста заглянувших купили. Доля процента - обычное дело,
+            // поэтому два знака: округление до целых всё превратило бы в нули.
+            conversion: st.clicks > 0 ? Math.round((st.sold / st.clicks) * 10000) / 100 : null,
+            cardShare: st.card_share === null ? null : Number(st.card_share),
+            // Та же доля, но по двум магазинам вместе - интерфейс показывает её рядом,
+            // когда она отличается от доли этого магазина.
+            ourShare: ourShareByCard.has(st.card_id)
+              ? Math.round(ourShareByCard.get(st.card_id) * 100) / 100
+              : null,
+            inStock: st.in_stock,
+            from: st.period_from,
+            to: st.period_to,
+          };
+        })(),
         card: rank && {
           cardId: rank.card_id,
           place: rank.place,
@@ -363,6 +402,7 @@ router.get('/sales', async (req, res, next) => {
       categories: categoryList,
       products: productList,
       drop: dropCandidates(productList, days),
+      trafficPeriod: statsPeriod,
       ranksCheckedAt: ranks.rows.reduce(
         (latest, r) => (!latest || r.checked_at > latest ? r.checked_at : latest), null
       ),
@@ -475,6 +515,23 @@ function dropCandidates(products, days) {
     if (p.daysSinceSale !== null && p.daysSinceSale >= quiet) {
       reasons.push(`не продавалось ${p.daysSinceSale} ${plural(p.daysSinceSale, 'день', 'дня', 'дней')}`);
     }
+    // Трафик из отчёта кабинета. Он отвечает на вопрос, который по заказам не задать:
+    // товар не берут, потому что он не нужен, или потому что покупают не у нас.
+    if (p.traffic) {
+      const t = p.traffic;
+      if (t.clicks >= 1000 && t.sold === 0) {
+        reasons.push(
+          `${t.clicks.toLocaleString('ru-RU')} ${plural(t.clicks, 'просмотр', 'просмотра', 'просмотров')}` +
+          ' на карточке и ни одной продажи' + (t.inStock ? '' : ' — нашего предложения там нет')
+        );
+      } else if (t.clicks >= 20000 && t.ourShare !== null && t.ourShare < 20) {
+        reasons.push(
+          `${t.clicks.toLocaleString('ru-RU')} ${plural(t.clicks, 'просмотр', 'просмотра', 'просмотров')}, ` +
+          `а досталось нам ${String(t.ourShare).replace('.', ',')}% карточки — покупают у других`
+        );
+      }
+    }
+
     // Нашего предложения на карточке нет - оно уже снято или кончился остаток.
     // Это не повод снимать, это повод знать: товар не продаётся, потому что его не видно.
     if (p.card && p.card.place === null) {
@@ -486,11 +543,117 @@ function dropCandidates(products, days) {
     if (reasons.length > 0) out.push({ ...p, reasons });
   }
 
-  // Сверху те, где на кону больше денег: убыток важнее тишины на складе
+  // Сверху те, где на кону больше денег: убыток важнее тишины на складе, а между
+  // прочими равными вперёд идёт тот, у кого больше потерянного трафика - сто тысяч
+  // просмотров мимо кассы дороже, чем позиция, которую никто и не искал.
   return out.sort((a, b) => {
     const loss = (x) => (x.profit !== null && x.profit < 0 ? -x.profit : 0);
-    return loss(b) - loss(a) || b.reasons.length - a.reasons.length || b.revenue - a.revenue;
+    const missed = (x) => (x.traffic ? x.traffic.clicks : 0);
+    return loss(b) - loss(a) || b.reasons.length - a.reasons.length
+      || missed(b) - missed(a) || b.revenue - a.revenue;
   });
+}
+
+// GET /api/analytics/card-stats - какие отчёты из кабинета уже загружены
+router.get('/card-stats', async (req, res, next) => {
+  try {
+    const { rows } = await db.query(
+      `SELECT s.store_id, st.name AS store_name,
+              c.period_from::text AS period_from, c.period_to::text AS period_to,
+              COUNT(*)::int AS cards, SUM(c.clicks)::bigint AS clicks,
+              SUM(c.sold)::int AS sold, MAX(c.loaded_at) AS loaded_at
+       FROM kaspi_card_stats c
+       JOIN stores st ON st.id = c.store_id
+       JOIN (SELECT DISTINCT store_id FROM kaspi_card_stats) s ON s.store_id = c.store_id
+       GROUP BY 1, 2, 3, 4
+       ORDER BY period_to DESC, store_name`
+    );
+    res.json({ data: rows.map((r) => ({ ...r, clicks: Number(r.clicks) })) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/analytics/card-stats - принять разобранный отчёт
+//
+// Файл разбирает браузер (xlsx там уже есть ради «Денег»), сюда приходят готовые строки.
+// Магазин присылается отдельно: внутри отчёта его нет - он есть только в имени файла,
+// а имя при пересылке теряется.
+router.post('/card-stats', async (req, res, next) => {
+  try {
+    const storeId = Number(req.body?.storeId);
+    const from = String(req.body?.from || '');
+    const to = String(req.body?.to || '');
+    const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
+
+    const isDay = (v) => /^\d{4}-\d{2}-\d{2}$/.test(v);
+    if (!Number.isInteger(storeId) || storeId <= 0) {
+      return res.status(400).json({ error: 'Не указан магазин' });
+    }
+    if (!isDay(from) || !isDay(to)) {
+      return res.status(400).json({ error: 'В отчёте не нашёлся период' });
+    }
+    if (rows.length === 0) {
+      return res.status(400).json({ error: 'В отчёте нет ни одной строки с товаром' });
+    }
+
+    const store = await db.query('SELECT id FROM stores WHERE id = $1', [storeId]);
+    if (store.rows.length === 0) return res.status(404).json({ error: 'Такого магазина нет' });
+
+    let saved = 0;
+    let skipped = 0;
+    for (const row of rows) {
+      const cardId = String(row.cardId || '').trim();
+      if (!cardId) { skipped++; continue; }
+      await db.query(
+        `INSERT INTO kaspi_card_stats
+           (store_id, card_id, period_from, period_to, name, category,
+            price, in_stock, sold, revenue, clicks, card_share, loaded_at)
+         VALUES ($1, $2, $3::date, $4::date, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
+         ON CONFLICT (store_id, card_id, period_from, period_to) DO UPDATE SET
+           name = EXCLUDED.name, category = EXCLUDED.category, price = EXCLUDED.price,
+           in_stock = EXCLUDED.in_stock, sold = EXCLUDED.sold, revenue = EXCLUDED.revenue,
+           clicks = EXCLUDED.clicks, card_share = EXCLUDED.card_share, loaded_at = NOW()`,
+        [
+          storeId, cardId, from, to,
+          String(row.name || '').slice(0, 500) || null,
+          String(row.category || '').slice(0, 200) || null,
+          row.price === null || row.price === undefined ? null : Number(row.price),
+          row.inStock !== false,
+          Number(row.sold) || 0,
+          Number(row.revenue) || 0,
+          Number(row.clicks) || 0,
+          row.share === null || row.share === undefined ? null : Number(row.share),
+        ]
+      );
+      saved++;
+    }
+
+    res.json({ saved, skipped, from, to });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Последний загруженный отчёт по каждому магазину. Именно последний, а не за период
+// аналитики: отчёт берут за свой отрезок, и подгонять его под выбранный период нельзя -
+// получилось бы, что цифры то появляются, то исчезают в зависимости от календаря.
+// Поэтому интерфейс пишет рядом, за какой период эти клики.
+async function latestCardStats(store) {
+  const { rows } = await db.query(
+    `WITH latest AS (
+       SELECT store_id, MAX(period_to) AS period_to
+       FROM kaspi_card_stats
+       WHERE ($1::int IS NULL OR store_id = $1)
+       GROUP BY store_id
+     )
+     SELECT c.store_id, c.card_id, c.sold, c.revenue, c.clicks, c.card_share,
+            c.in_stock, c.period_from::text AS period_from, c.period_to::text AS period_to
+     FROM kaspi_card_stats c
+     JOIN latest l ON l.store_id = c.store_id AND l.period_to = c.period_to`,
+    [store]
+  );
+  return rows;
 }
 
 // Себестоимость каждого изделия - теми же формулами, что и раздел «Себестоимость»

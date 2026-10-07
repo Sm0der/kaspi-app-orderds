@@ -234,6 +234,33 @@ CREATE TABLE IF NOT EXISTS product_card_ranks (
   PRIMARY KEY (store_id, sku)
 );
 
+-- Обзорный отчёт по аналитике из кабинета Kaspi. Две цифры в нём есть только там и
+-- больше нигде: КЛИКИ по карточке и ДОЛЯ В КАРТОЧКЕ - сколько её продаж досталось нам.
+-- Без них «товар продаётся плохо» неотличимо от «товар нужен, но покупают не у нас»:
+-- у шкафа Qazyna Jihaz Ультра 390 тысяч просмотров на два магазина и 9% доли.
+-- API заказов этого не отдаёт, публичный каталог блокирует Vercel, поэтому данные
+-- приходят файлом: владелец выгружает отчёт в кабинете и загружает кнопкой.
+--
+-- Период в ключе: отчёты берут за разные отрезки, и загрузка нового не должна затирать
+-- старый - по ним видно, как менялась доля.
+CREATE TABLE IF NOT EXISTS kaspi_card_stats (
+  store_id    INTEGER NOT NULL REFERENCES stores(id),
+  card_id     VARCHAR(64) NOT NULL,
+  period_from DATE NOT NULL,
+  period_to   DATE NOT NULL,
+  name        VARCHAR(500),
+  category    VARCHAR(200),
+  -- NULL = в отчёте стояло «Нет в наличии»: предложения на карточке сейчас нет
+  price       NUMERIC(12, 2),
+  in_stock    BOOLEAN NOT NULL DEFAULT TRUE,
+  sold        INTEGER NOT NULL DEFAULT 0,
+  revenue     NUMERIC(14, 2) NOT NULL DEFAULT 0,
+  clicks      INTEGER NOT NULL DEFAULT 0,
+  card_share  NUMERIC(6, 2),
+  loaded_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (store_id, card_id, period_from, period_to)
+);
+
 -- Миграция: хеш присланного Kaspi JSON заказа. У Kaspi нет фильтра "изменённые с ...",
 -- он всегда отдаёт все заказы за 14 дней, поэтому изменившиеся мы вычисляем сами -
 -- сравнением хеша. Без этого каждая синхронизация переписывала все ~1300 заказов,

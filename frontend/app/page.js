@@ -179,7 +179,7 @@ function Workspace({ onLogout }) {
         {mode === 'costing' && canCosting ? (
           <CostingView isAdmin={isAdmin} />
         ) : mode === 'analytics' && isAdmin ? (
-          <AnalyticsView storeId={storeId} />
+          <AnalyticsView storeId={storeId} stores={stores} />
         ) : mode === 'finance' && isAdmin ? (
           <FinanceView />
         ) : mode === 'settings' && isAdmin ? (

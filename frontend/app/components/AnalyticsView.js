@@ -38,7 +38,7 @@ function byCalendar(rows, from, to, field) {
   return out;
 }
 
-export default function AnalyticsView({ storeId }) {
+export default function AnalyticsView({ storeId, stores = [] }) {
   // Период живёт одной парой дат, а не числом дней: так его можно выбрать календарём
   // и так же задать в «Заказах» - вопрос «что было с 1 по 15 марта» один и тот же.
   const [range, setRange] = useState(() => {
@@ -93,7 +93,7 @@ export default function AnalyticsView({ storeId }) {
     return (
       <div className="analytics">
         {periodBar}
-        <SalesView range={range} storeId={storeId} />
+        <SalesView range={range} storeId={storeId} stores={stores} />
       </div>
     );
   }

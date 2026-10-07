@@ -82,6 +82,81 @@ function Place({ card }) {
   );
 }
 
+// Доля карточки. Kaspi считает её на магазин, а мы на одной карточке стоим дважды -
+// поэтому показываем общую, а долю этого магазина уводим в подпись: иначе бестселлер,
+// поделённый между нашими же магазинами, выглядит как провал в обоих.
+function Share({ traffic }) {
+  if (!traffic || traffic.cardShare === null) return <span className="t-faint">—</span>;
+  const our = traffic.ourShare === null ? traffic.cardShare : traffic.ourShare;
+  const split = Math.abs(our - traffic.cardShare) > 0.01;
+  return (
+    <>
+      <span data-loss={our < 20 && traffic.clicks >= 20000 || undefined}>{pct(our)}</span>
+      {split && (
+        <div className="t-faint" style={{ fontSize: 12 }} title="доля этого магазина; остальное — второй наш магазин">
+          этот {pct(traffic.cardShare)}
+        </div>
+      )}
+    </>
+  );
+}
+
+// Загрузка обзорного отчёта из кабинета Kaspi. Клики и доля карточки есть только там:
+// API заказов их не отдаёт, а публичный каталог блокирует наш сервер, так что иначе
+// не узнать, товар не берут потому что он не нужен - или потому что покупают не у нас.
+function Uploads({ stores, uploads, busy, onFile, period }) {
+  const [store, setStore] = useState('');
+
+  return (
+    <div className="panel" style={{ marginBottom: 16 }}>
+      <div className="panel-body">
+        <div className="toolbar" style={{ marginBottom: 0 }}>
+          <div>
+            <b>Отчёт по аналитике Kaspi</b>
+            <div className="t-dim" style={{ fontSize: 13, marginTop: 2 }}>
+              {period
+                ? <>Просмотры и доля карточки — за {dateLabel(period.from)} — {dateLabel(period.to)}.</>
+                : <>Кабинет Kaspi → Аналитика → Обзорный отчёт. Пока не загружен: колонки «Смотрели» и «Доля карточки» пустые.</>}
+            </div>
+          </div>
+          <div className="topbar-spacer" style={{ flex: 1 }} />
+          <select className="select" value={store} onChange={(e) => setStore(e.target.value)}>
+            <option value="">Выберите магазин…</option>
+            {stores.map((st) => <option key={st.id} value={st.id}>{st.name}</option>)}
+          </select>
+          <label
+            className="btn btn-primary"
+            style={{ cursor: !store || busy ? 'not-allowed' : 'pointer', opacity: !store || busy ? 0.55 : 1 }}
+            title={store ? 'Файл .xlsx или .xlsm из кабинета' : 'Сначала выберите, чей это отчёт'}
+          >
+            {busy && <span className="spinner" />} Загрузить отчёт
+            <input
+              type="file"
+              accept=".xlsx,.xlsm,.xls"
+              style={{ display: 'none' }}
+              disabled={!store || busy}
+              onChange={(e) => { onFile(e.target.files[0], Number(store)); e.target.value = ''; }}
+            />
+          </label>
+        </div>
+
+        {uploads.length > 0 && (
+          <p className="t-dim" style={{ marginTop: 12, marginBottom: 0, fontSize: 13 }}>
+            Загружено:{' '}
+            {uploads.map((u, i) => (
+              <span key={`${u.store_id}:${u.period_to}`}>
+                {i > 0 && ' · '}
+                <b>{u.store_name}</b> {dateLabel(u.period_from)} — {dateLabel(u.period_to)},{' '}
+                {u.cards} карточек, {Number(u.clicks).toLocaleString('ru-RU')} просмотров
+              </span>
+            ))}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 const SORTS = [
   ['revenue', 'По выручке'],
   ['qty', 'По штукам'],
@@ -89,16 +164,22 @@ const SORTS = [
   ['margin', 'По наценке'],
   ['cancel', 'По отказам'],
   ['place', 'По месту на карточке'],
+  ['clicks', 'По просмотрам'],
+  ['conversion', 'По конверсии'],
+  ['share', 'По доле карточки'],
   ['quiet', 'По тишине'],
 ];
 
-export default function SalesView({ range, storeId }) {
+export default function SalesView({ range, storeId, stores = [] }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [sort, setSort] = useState('revenue');
   const [category, setCategory] = useState(null);
   const [search, setSearch] = useState('');
+  const [uploads, setUploads] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -116,6 +197,17 @@ export default function SalesView({ range, storeId }) {
   }, [range.from, range.to, storeId]);
 
   useEffect(() => { load(); }, [load]);
+
+  const loadUploads = useCallback(async () => {
+    try {
+      const { data } = await api.get('/api/analytics/card-stats');
+      setUploads(data.data || []);
+    } catch {
+      setUploads([]);
+    }
+  }, []);
+
+  useEffect(() => { loadUploads(); }, [loadUploads]);
 
   // Товары, разложенные по категориям: раскрытая категория показывает свои позиции
   // прямо под собой. Раньше клик только фильтровал таблицу в самом низу страницы -
@@ -150,13 +242,73 @@ export default function SalesView({ range, storeId }) {
       margin: (p) => (p.margin === null ? last : p.margin),
       cancel: (p) => p.cancelShare,
       place: (p) => (!p.card ? last : p.card.place === null ? 1e6 : -p.card.place),
+      clicks: (p) => (p.traffic ? p.traffic.clicks : last),
+      // Худшая конверсия вперёд, и только там, где трафик вообще был: три клика
+      // и ноль продаж - это не провал, это отсутствие данных.
+      conversion: (p) => (p.traffic && p.traffic.clicks >= 1000 ? -p.traffic.conversion : last),
+      share: (p) => (p.traffic && p.traffic.ourShare !== null ? -p.traffic.ourShare : last),
       quiet: (p) => (p.daysSinceSale === null ? last : p.daysSinceSale),
     }[sort];
 
     return [...list].sort((a, b) => by(b) - by(a));
   }, [data, sort, category, search]);
 
-  if (error) {
+  // Отчёт разбираем в браузере: xlsx тут уже есть ради «Денег», серверу лишняя
+  // зависимость ни к чему. Магазин спрашиваем отдельно - внутри файла его нет,
+  // он только в имени, а имя при пересылке теряется.
+  const onFile = async (file, store) => {
+    if (!file) return;
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const XLSX = await import('xlsx');
+      const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+      const sheet = wb.Sheets['Товары'] || wb.Sheets[wb.SheetNames[0]];
+      const grid = XLSX.utils.sheet_to_json(sheet, { header: 'A', raw: true, defval: null });
+
+      // Шапка отчёта - пары «Параметр / Значение» до таблицы, период лежит там
+      const meta = {};
+      for (const r of grid) if (r.A && r.B && !r.C) meta[String(r.A).trim()] = String(r.B).trim();
+      const span = String(meta['Период'] || '').match(/^(\d{2})\.(\d{2})\.(\d{4})\D+(\d{2})\.(\d{2})\.(\d{4})$/);
+      if (!span) throw new Error('Это не похоже на обзорный отчёт Kaspi: не нашёл строку «Период»');
+      const from = `${span[3]}-${span[2]}-${span[1]}`;
+      const to = `${span[6]}-${span[5]}-${span[4]}`;
+
+      const head = grid.findIndex((r) => String(r.A || '').trim() === 'Товар');
+      if (head < 0) throw new Error('В отчёте нет таблицы товаров');
+
+      const rows = [];
+      for (const r of grid.slice(head + 1)) {
+        const cardId = String(r.A || '').trim();
+        if (!cardId) continue;
+        rows.push({
+          cardId,
+          name: r.B,
+          category: r.C,
+          // «Нет в наличии» вместо цены означает, что предложения на карточке нет
+          price: r.D === 'Нет в наличии' ? null : Number(r.D),
+          inStock: r.D !== 'Нет в наличии',
+          sold: Number(r.E) || 0,
+          revenue: Number(r.F) || 0,
+          clicks: Number(r.G) || 0,
+          share: r.H === null || r.H === undefined ? null : Number(r.H),
+        });
+      }
+      if (rows.length === 0) throw new Error('В отчёте не нашлось ни одного товара');
+
+      const { data } = await api.post('/api/analytics/card-stats', { storeId: store, from, to, rows });
+      setNotice(`Загружено карточек: ${data.saved} за ${dateLabel(data.from)} — ${dateLabel(data.to)}`);
+      await loadUploads();
+      await load();
+    } catch (err) {
+      setError(err.message && !err.response ? err.message : errorText(err, 'Не удалось загрузить отчёт'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (error && !data) {
     return (
       <div className="panel"><div className="panel-body">
         <div className="alert alert-error">{error}</div>
@@ -173,6 +325,17 @@ export default function SalesView({ range, storeId }) {
 
   return (
     <div className={loading ? 'is-reloading' : undefined}>
+      {error && <div className="alert alert-error">{error}</div>}
+      {notice && <div className="alert">{notice}</div>}
+
+      <Uploads
+        stores={stores}
+        uploads={uploads}
+        busy={busy}
+        onFile={onFile}
+        period={data.trafficPeriod}
+      />
+
       <div className="kpi-grid" style={{ marginBottom: 20 }}>
         <div className="kpi">
           <div className="kpi-value kpi-money num">{money(data.revenue)} ₸</div>
@@ -301,6 +464,9 @@ export default function SalesView({ range, storeId }) {
               <th className="ta-r">Выручка</th>
               <th className="ta-r">Наценка</th>
               <th className="ta-r">Отказов</th>
+              <th className="ta-r">Смотрели</th>
+              <th className="ta-r">Купили</th>
+              <th className="ta-r">Доля карточки</th>
               <th className="ta-r">Место</th>
               <th className="ta-r">Дороже рынка</th>
               <th className="ta-r">К прошлому</th>
@@ -335,6 +501,15 @@ export default function SalesView({ range, storeId }) {
                 <td className="num ta-r t-dim">
                   {p.cancelledQty > 0 ? <>{pct(p.cancelShare)}<div className="t-faint" style={{ fontSize: 12 }}>{p.cancelledQty} шт</div></> : '—'}
                 </td>
+                <td className="num ta-r t-dim">{p.traffic ? money(p.traffic.clicks) : '—'}</td>
+                <td className="num ta-r">
+                  {p.traffic && p.traffic.conversion !== null
+                    ? <span data-loss={p.traffic.clicks >= 20000 && p.traffic.conversion < 0.1 || undefined}>
+                        {pct(p.traffic.conversion)}
+                      </span>
+                    : <span className="t-faint">—</span>}
+                </td>
+                <td className="num ta-r"><Share traffic={p.traffic} /></td>
                 <td className="ta-r"><Place card={p.card} /></td>
                 <td className="num ta-r">
                   {p.card && p.card.gap !== null && p.card.gap > 0
@@ -404,6 +579,8 @@ function CategoryRow({ category: c, products, open, onToggle }) {
                       <th className="ta-r">Доля в категории</th>
                       <th className="ta-r">Наценка</th>
                       <th className="ta-r">Отказов</th>
+                      <th className="ta-r">Смотрели</th>
+                      <th className="ta-r">Доля карточки</th>
                       <th className="ta-r">Место</th>
                       <th className="ta-r">К прошлому</th>
                     </tr>
@@ -429,6 +606,8 @@ function CategoryRow({ category: c, products, open, onToggle }) {
                             : <span data-loss={p.profit < 0 || undefined}>{pct(p.margin)}</span>}
                         </td>
                         <td className="num ta-r t-dim">{p.cancelledQty > 0 ? pct(p.cancelShare) : '—'}</td>
+                        <td className="num ta-r t-dim">{p.traffic ? money(p.traffic.clicks) : '—'}</td>
+                        <td className="num ta-r"><Share traffic={p.traffic} /></td>
                         <td className="ta-r"><Place card={p.card} /></td>
                         <td className="num ta-r">
                           <Change value={p.qtyChange} isNew={p.prevQty === 0} byCard={p.movedBetweenStores} />
