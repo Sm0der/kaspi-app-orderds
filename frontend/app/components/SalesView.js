@@ -117,6 +117,20 @@ export default function SalesView({ range, storeId }) {
 
   useEffect(() => { load(); }, [load]);
 
+  // Товары, разложенные по категориям: раскрытая категория показывает свои позиции
+  // прямо под собой. Раньше клик только фильтровал таблицу в самом низу страницы -
+  // ответ был, но до него надо было доскроллить и догадаться, что он там появился.
+  const byCategory = useMemo(() => {
+    const map = new Map();
+    if (!data) return map;
+    for (const p of data.products) {
+      if (!map.has(p.category)) map.set(p.category, []);
+      map.get(p.category).push(p);
+    }
+    for (const list of map.values()) list.sort((a, b) => b.revenue - a.revenue);
+    return map;
+  }, [data]);
+
   const rows = useMemo(() => {
     if (!data) return [];
     const needle = search.trim().toLowerCase();
@@ -183,8 +197,10 @@ export default function SalesView({ range, storeId }) {
 
       <Panel
         title="Категории"
-        note={`Категорию называет сам Kaspi в составе заказа — это та же категория, по которой
-               товар ищет покупатель. Сравнение с предыдущими ${data.range.days} ${plural(data.range.days, 'днём', 'днями', 'днями')}
+        note={`Нажмите категорию — раскроются её товары, а таблица «Все позиции» внизу
+               отфильтруется по ней же. Категорию называет сам Kaspi в составе заказа: это та же
+               категория, по которой товар ищет покупатель. Сравнение с предыдущими
+               ${data.range.days} ${plural(data.range.days, 'днём', 'днями', 'днями')}
                (${dateLabel(data.previous.from)} — ${dateLabel(data.previous.to)}).`}
       >
         <table className="data">
@@ -202,26 +218,13 @@ export default function SalesView({ range, storeId }) {
           </thead>
           <tbody>
             {categories.map((c) => (
-              <tr
+              <CategoryRow
                 key={c.category}
-                onClick={() => setCategory(category === c.category ? null : c.category)}
-                style={{ cursor: 'pointer' }}
-                data-selected={category === c.category || undefined}
-              >
-                <td>
-                  {c.category}
-                  {category === c.category && <span className="t-dim"> · показываем только её</span>}
-                </td>
-                <td className="num ta-r">{money(c.revenue)}</td>
-                <td className="num ta-r">
-                  <span className="share-bar" style={{ '--fill': `${c.share}%` }}>{pct(c.share)}</span>
-                </td>
-                <td className="num ta-r">{c.qty}</td>
-                <td className="num ta-r t-dim">{c.positions}</td>
-                <td className="num ta-r">{money(c.avgPrice)}</td>
-                <td className="num ta-r t-dim">{pct(c.cancelShare)}</td>
-                <td className="num ta-r"><Change value={c.change} isNew={c.prevRevenue === null} /></td>
-              </tr>
+                category={c}
+                products={byCategory.get(c.category) || []}
+                open={category === c.category}
+                onToggle={() => setCategory(category === c.category ? null : c.category)}
+              />
             ))}
           </tbody>
         </table>
@@ -361,6 +364,85 @@ export default function SalesView({ range, storeId }) {
         {rows.length === 0 && <p className="t-dim">Под фильтр ничего не попало.</p>}
       </Panel>
     </div>
+  );
+}
+
+// Строка категории. Раскрывается в список своих товаров - и заодно оставляет фильтр
+// на таблице «Все позиции» внизу, как было раньше: кому нужны сортировки и поиск,
+// тот идёт туда, а быстрый ответ «что внутри категории» теперь на месте вопроса.
+function CategoryRow({ category: c, products, open, onToggle }) {
+  return (
+    <>
+      <tr onClick={onToggle} style={{ cursor: 'pointer' }} data-selected={open || undefined}>
+        <td>
+          <span className="disclosure" data-open={open || undefined}>▸</span>
+          {c.category}
+        </td>
+        <td className="num ta-r">{money(c.revenue)}</td>
+        <td className="num ta-r">
+          <span className="share-bar" style={{ '--fill': `${c.share}%` }}>{pct(c.share)}</span>
+        </td>
+        <td className="num ta-r">{c.qty}</td>
+        <td className="num ta-r t-dim">{c.positions}</td>
+        <td className="num ta-r">{money(c.avgPrice)}</td>
+        <td className="num ta-r t-dim">{pct(c.cancelShare)}</td>
+        <td className="num ta-r"><Change value={c.change} isNew={c.prevRevenue === null} /></td>
+      </tr>
+      {open && (
+        <tr>
+          <td colSpan={8} style={{ paddingTop: 0 }}>
+            <div className="product-orders">
+              {products.length === 0 ? (
+                <p className="t-dim" style={{ margin: '6px 0' }}>Позиций в категории не нашлось.</p>
+              ) : (
+                <table className="data">
+                  <thead>
+                    <tr>
+                      <th>Товар</th>
+                      <th className="ta-r">Штук</th>
+                      <th className="ta-r">Выручка</th>
+                      <th className="ta-r">Доля в категории</th>
+                      <th className="ta-r">Наценка</th>
+                      <th className="ta-r">Отказов</th>
+                      <th className="ta-r">Место</th>
+                      <th className="ta-r">К прошлому</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {products.map((p) => (
+                      <tr key={`${p.storeId}:${p.sku}`}>
+                        <td>
+                          <div>{p.name}</div>
+                          <div className="t-faint" style={{ fontSize: 12 }}>
+                            {p.storeName}
+                            {p.costCode && <> · {p.costCode}</>}
+                          </div>
+                        </td>
+                        <td className="num ta-r">{p.qty}</td>
+                        <td className="num ta-r">{money(p.revenue)}</td>
+                        <td className="num ta-r t-dim">
+                          {c.revenue > 0 ? pct(Math.round((p.revenue / c.revenue) * 1000) / 10) : '—'}
+                        </td>
+                        <td className="num ta-r">
+                          {p.margin === null
+                            ? <span className="t-faint" title="товар не связан с изделием в «Себестоимости»">—</span>
+                            : <span data-loss={p.profit < 0 || undefined}>{pct(p.margin)}</span>}
+                        </td>
+                        <td className="num ta-r t-dim">{p.cancelledQty > 0 ? pct(p.cancelShare) : '—'}</td>
+                        <td className="ta-r"><Place card={p.card} /></td>
+                        <td className="num ta-r">
+                          <Change value={p.qtyChange} isNew={p.prevQty === 0} byCard={p.movedBetweenStores} />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
   );
 }
 

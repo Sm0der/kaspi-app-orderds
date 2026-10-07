@@ -175,20 +175,7 @@ export default function AnalyticsView({ storeId }) {
           </table>
         </Panel>
 
-        <Panel title="Города" note="По адресу доставки в заказе">
-          <table className="data">
-            <thead><tr><th>Город</th><th className="ta-r">Заказов</th><th className="ta-r">Выручка</th></tr></thead>
-            <tbody>
-              {l.towns.map((row) => (
-                <tr key={row.town}>
-                  <td>{row.town}</td>
-                  <td className="num ta-r">{row.orders}</td>
-                  <td className="num ta-r t-dim">{money(row.revenue)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </Panel>
+        <Towns rows={l.towns} />
       </div>
 
       <Panel
@@ -271,6 +258,81 @@ export default function AnalyticsView({ storeId }) {
         </div>
       </Panel>
     </div>
+  );
+}
+
+// Города доставки. Список полный - за два года их 296, - но целиком он на экране не
+// нужен: сверху лежит десяток, который и делает выручку. Поэтому сначала показываем
+// первые 12, а дальше по кнопке, и к каждому городу пишем долю: «Алматы 420» само по
+// себе ничего не говорит, пока не видно, что это треть всех заказов.
+function Towns({ rows }) {
+  const [all, setAll] = useState(false);
+  const [search, setSearch] = useState('');
+
+  const totals = useMemo(() => rows.reduce(
+    (acc, r) => ({ orders: acc.orders + r.orders, revenue: acc.revenue + Number(r.revenue) }),
+    { orders: 0, revenue: 0 }
+  ), [rows]);
+
+  const found = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    return needle ? rows.filter((r) => r.town.toLowerCase().includes(needle)) : rows;
+  }, [rows, search]);
+
+  // Поиск показывает всё найденное: человек ищет конкретный город, и прятать его
+  // за кнопкой «показать все» было бы издевательством.
+  const shown = search.trim() || all ? found : found.slice(0, 12);
+  const share = (part, whole) => (whole > 0 ? Math.round((part / whole) * 1000) / 10 : 0);
+
+  return (
+    <Panel
+      title="Города"
+      note={`По адресу доставки в заказе. Всего городов: ${rows.length}, заказов ${totals.orders}.`}
+    >
+      <input
+        className="input"
+        placeholder="Найти город"
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        style={{ maxWidth: 220, marginBottom: 12 }}
+      />
+      <table className="data">
+        <thead>
+          <tr>
+            <th>Город</th>
+            <th className="ta-r">Заказов</th>
+            <th className="ta-r">Доля</th>
+            <th className="ta-r">Выручка</th>
+            <th className="ta-r">Доля денег</th>
+          </tr>
+        </thead>
+        <tbody>
+          {shown.map((row) => (
+            <tr key={row.town}>
+              <td>{row.town}</td>
+              <td className="num ta-r">{row.orders}</td>
+              <td className="num ta-r">
+                <span className="share-bar" style={{ '--fill': `${share(row.orders, totals.orders)}%` }}>
+                  {String(share(row.orders, totals.orders)).replace('.', ',')}%
+                </span>
+              </td>
+              <td className="num ta-r t-dim">{money(row.revenue)}</td>
+              <td className="num ta-r t-dim">
+                {String(share(Number(row.revenue), totals.revenue)).replace('.', ',')}%
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      {shown.length === 0 && <p className="t-dim">Такого города в периоде нет.</p>}
+
+      {!search.trim() && rows.length > 12 && (
+        <button className="btn btn-sm" onClick={() => setAll(!all)} style={{ marginTop: 12 }}>
+          {all ? 'Показать только первые 12' : `Показать все ${rows.length}`}
+        </button>
+      )}
+    </Panel>
   );
 }
 
