@@ -108,7 +108,10 @@ router.get('/overview', async (req, res, next) => {
         `WITH ${SCOPE}
          SELECT COALESCE(NULLIF(town, ''), 'без города') AS town,
                 COUNT(*) FILTER (WHERE NOT cancelled)::int AS orders,
-                COALESCE(SUM(total_price) FILTER (WHERE NOT cancelled), 0)::numeric AS revenue
+                COALESCE(SUM(total_price) FILTER (WHERE NOT cancelled), 0)::numeric AS revenue,
+                -- Иначе в хвосте списка стоят города с нулём и непонятно, откуда они
+                -- взялись: это места, куда заказывали, но всё отменили.
+                COUNT(*) FILTER (WHERE cancelled)::int AS cancelled
          -- Без LIMIT: городов за два года 296, это десяток килобайт, зато владелец
          -- видит весь список, а не «прочие». Обрезать до интересного - дело экрана.
          FROM scope GROUP BY 1 ORDER BY orders DESC`,

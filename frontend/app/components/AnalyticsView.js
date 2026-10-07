@@ -304,6 +304,7 @@ function Towns({ rows }) {
             <th className="ta-r">Доля</th>
             <th className="ta-r">Выручка</th>
             <th className="ta-r">Доля денег</th>
+            <th className="ta-r">Отменено</th>
           </tr>
         </thead>
         <tbody>
@@ -320,6 +321,7 @@ function Towns({ rows }) {
               <td className="num ta-r t-dim">
                 {String(share(Number(row.revenue), totals.revenue)).replace('.', ',')}%
               </td>
+              <td className="num ta-r t-dim">{row.cancelled || '—'}</td>
             </tr>
           ))}
         </tbody>
