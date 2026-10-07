@@ -396,8 +396,12 @@ export default function SalesView({ range, storeId, stores = [] }) {
       {drop.length > 0 && (
         <Panel
           title="Стоит пересмотреть"
-          note="Не приговор, а повод посмотреть: у каждой строки написано, чем она сюда попала.
-                Решение за вами — сервис ничего не снимает и не меняет цены."
+          note={`Не приговор, а повод посмотреть: у каждой строки написано, чем она сюда попала.
+                 Решение за вами — сервис ничего не снимает и не меняет цены.${
+                   data.trafficPeriod
+                     ? ` Продажи здесь за выбранный период, а просмотры и доля карточки — за ${dateLabel(data.trafficPeriod.from)} — ${dateLabel(data.trafficPeriod.to)}: отчёт кабинета берётся за свой отрезок.`
+                     : ''
+                 }`}
         >
           <div className="drop-list">
             {drop.map((p) => (
@@ -423,11 +427,14 @@ export default function SalesView({ range, storeId, stores = [] }) {
 
       <Panel
         title="Все позиции"
-        note={
+        note={[
           data.ranksCheckedAt
             ? `Место на карточке — наша строчка в списке продавцов, он отсортирован по цене. Снимок от ${dateLabel(data.ranksCheckedAt)}.`
-            : 'Места на карточках ещё не собирали — колонка «Место» будет пустой.'
-        }
+            : 'Места на карточках ещё не собирали — колонка «Место» будет пустой.',
+          data.trafficPeriod
+            ? `«Смотрели», «Купили» и «Доля карточки» — из отчёта кабинета за ${dateLabel(data.trafficPeriod.from)} — ${dateLabel(data.trafficPeriod.to)}, а не за выбранный период. Доля общая по двум магазинам, под ней — доля этого.`
+            : null,
+        ].filter(Boolean).join(' ')}
       >
         <div className="toolbar" style={{ marginBottom: 14 }}>
           <input
