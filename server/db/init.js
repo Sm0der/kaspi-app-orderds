@@ -234,6 +234,26 @@ CREATE TABLE IF NOT EXISTS product_card_ranks (
   PRIMARY KEY (store_id, sku)
 );
 
+-- История тех же замеров по дням. Нужна, чтобы увидеть не «где мы стоим», а «что
+-- изменилось со вчера»: 07.10.2026 цена на InHome Comfort 4D поднялась с 87 890 до
+-- 94 500, мы уехали со 2-го места на 8-е, и продажи упали с одиннадцати штук в день
+-- до двух. По таблице текущих мест этого не видно - она хранит только сегодняшний срез.
+-- День в ключе, а не момент: замер делается раз в сутки, повторный запуск за тот же
+-- день должен уточнять строку, а не плодить их.
+CREATE TABLE IF NOT EXISTS product_card_rank_history (
+  checked_day  DATE NOT NULL,
+  store_id     INTEGER NOT NULL REFERENCES stores(id),
+  sku          VARCHAR(64) NOT NULL,
+  card_id      VARCHAR(64) NOT NULL,
+  place        INTEGER,
+  offers_total INTEGER NOT NULL,
+  our_price    NUMERIC(12, 2),
+  best_price   NUMERIC(12, 2),
+  best_seller  VARCHAR(200),
+  PRIMARY KEY (checked_day, store_id, sku)
+);
+CREATE INDEX IF NOT EXISTS idx_card_rank_history_day ON product_card_rank_history(checked_day DESC);
+
 -- Обзорный отчёт по аналитике из кабинета Kaspi. Две цифры в нём есть только там и
 -- больше нигде: КЛИКИ по карточке и ДОЛЯ В КАРТОЧКЕ - сколько её продаж досталось нам.
 -- Без них «товар продаётся плохо» неотличимо от «товар нужен, но покупают не у нас»:

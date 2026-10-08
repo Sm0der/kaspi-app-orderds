@@ -1,7 +1,13 @@
 // На каком месте наше предложение на общей карточке Kaspi.
 //
 //   node scripts/fetch-card-ranks.js            # показать, ничего не записывая
-//   node scripts/fetch-card-ranks.js --apply    # записать в product_card_ranks
+//   node scripts/fetch-card-ranks.js --apply    # записать и показать, что изменилось
+//
+// Запускать РАЗ В СУТКИ. Ответ на вопрос «где мы стоим» даёт и один замер, но нужный
+// вопрос другой - «что изменилось со вчера». 07.10.2026 цену на InHome Comfort 4D
+// подняли с 87 890 до 94 500, мы уехали со 2-го места на 8-е, и продажи упали с
+// одиннадцати штук в день до двух; заметили это через двое суток. С --apply каждый
+// запуск кладёт срез в product_card_rank_history и печатает разницу с прошлым.
 //
 // Запускать ВРУЧНУЮ и не с сервера: публичный каталог Kaspi блокирует IP Vercel
 // (подробности в services/kaspiCatalog.js). Нужен DATABASE_URL от нужной базы.
@@ -20,6 +26,9 @@ const db = require('../db/init');
 const { cardOffers } = require('../services/kaspiCatalog');
 
 const APPLY = process.argv.includes('--apply');
+// День по Алматы: замер делают утром по местному времени, а на сервере UTC - без
+// сдвига утренний запуск попадал бы во вчерашний день.
+const today = new Date(Date.now() + 5 * 3600000).toISOString().slice(0, 10);
 const PAGES = 8; // 160 предложений - больше на карточке мебели не встречалось
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const money = (v) => (v === null || v === undefined ? '—' : Math.round(Number(v)).toLocaleString('ru-RU'));
@@ -125,6 +134,19 @@ const money = (v) => (v === null || v === undefined ? '—' : Math.round(Number(
     return;
   }
 
+  // Прошлый срез читаем ДО записи нового: иначе повторный запуск в тот же день
+  // сравнивал бы сегодняшние цифры сами с собой и всегда показывал «без изменений».
+  const { rows: previous } = await db.query(
+    // checked_day обязательно ::text: node-pg превращает DATE в Date по поясу процесса,
+    // и при печати через toISOString день уезжает на сутки назад.
+    `SELECT *, checked_day::text AS day_text FROM product_card_rank_history
+     WHERE checked_day = (
+       SELECT MAX(checked_day) FROM product_card_rank_history WHERE checked_day < $1::date
+     )`,
+    [today]
+  );
+  const was = new Map(previous.map((r) => [`${r.store_id}:${r.sku}`, r]));
+
   for (const r of [...found, ...absent]) {
     await db.query(
       `INSERT INTO product_card_ranks
@@ -137,8 +159,72 @@ const money = (v) => (v === null || v === undefined ? '—' : Math.round(Number(
          checked_at = NOW()`,
       [r.store_id, r.sku, r.card_id, r.place, r.offers_total, r.our_price, r.best_price, r.best_seller]
     );
+    await db.query(
+      `INSERT INTO product_card_rank_history
+         (checked_day, store_id, sku, card_id, place, offers_total, our_price, best_price, best_seller)
+       VALUES ($1::date, $2, $3, $4, $5, $6, $7, $8, $9)
+       ON CONFLICT (checked_day, store_id, sku) DO UPDATE SET
+         card_id = EXCLUDED.card_id, place = EXCLUDED.place,
+         offers_total = EXCLUDED.offers_total, our_price = EXCLUDED.our_price,
+         best_price = EXCLUDED.best_price, best_seller = EXCLUDED.best_seller`,
+      [today, r.store_id, r.sku, r.card_id, r.place, r.offers_total, r.our_price, r.best_price, r.best_seller]
+    );
   }
-  console.log(`\nЗаписано строк: ${found.length + absent.length}`);
+  console.log(`
+Записано строк: ${found.length + absent.length}, день ${today}`);
+
+  if (previous.length === 0) {
+    console.log('Это первый сохранённый срез - сравнивать пока не с чем, завтра будет.');
+    await db.pool.end();
+    return;
+  }
+
+  // Разница с прошлым срезом. Печатаем только то, что сдвинулось: когда из ста с лишним
+  // строк меняются три, их надо увидеть, а не искать глазами в полном списке.
+  const changes = [];
+  for (const r of [...found, ...absent]) {
+    const b = was.get(`${r.store_id}:${r.sku}`);
+    if (!b) continue;
+    const notes = [];
+
+    if (b.place !== null && r.place === null) notes.push('нашего предложения больше НЕТ на карточке');
+    if (b.place === null && r.place !== null) notes.push(`снова на карточке, ${r.place}-е место`);
+    if (b.place !== null && r.place !== null && r.place !== b.place) {
+      notes.push(`${r.place > b.place ? 'УПАЛИ' : 'поднялись'} ${b.place} -> ${r.place} из ${r.offers_total}`);
+    }
+
+    const moved = (before, now) =>
+      before !== null && now !== null && Math.round(Number(before)) !== Math.round(Number(now));
+    if (moved(b.our_price, r.our_price)) {
+      const diff = Number(r.our_price) - Number(b.our_price);
+      notes.push(`наша цена ${money(b.our_price)} -> ${money(r.our_price)} (${diff > 0 ? '+' : ''}${money(diff)})`);
+    }
+    if (moved(b.best_price, r.best_price)) {
+      notes.push(`рынок ${money(b.best_price)} -> ${money(r.best_price)}`);
+    }
+
+    if (notes.length) changes.push({ ...r, was: b, notes });
+  }
+
+  // Сверху то, где стало хуже: ушли с карточки или уехали вниз
+  const worse = (x) =>
+    (x.was.place !== null && x.place === null) ||
+    (x.place !== null && x.was.place !== null && x.place > x.was.place);
+  changes.sort((a, b) => (worse(b) ? 1 : 0) - (worse(a) ? 1 : 0));
+
+  const since = previous[0].day_text;
+  console.log(`
+Изменилось с ${since}: ${changes.length} из ${found.length + absent.length}`);
+  if (changes.length === 0) {
+    console.log('  всё на своих местах');
+  } else {
+    for (const ch of changes) {
+      console.log(
+        `  ${worse(ch) ? '!' : ' '} ${ch.name.slice(0, 40).padEnd(42)}${ch.store_name.padEnd(15)}${ch.notes.join('; ')}`
+      );
+    }
+  }
+
   await db.pool.end();
 })().catch((error) => {
   console.error(error);

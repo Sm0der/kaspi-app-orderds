@@ -157,6 +157,103 @@ function Uploads({ stores, uploads, busy, onFile, period }) {
   );
 }
 
+// Что сдвинулось на карточках со вчера. Самая верхняя панель раздела, и это не
+// вкусовщина: место на карточке меняется за минуты, а в выручке это видно через дни.
+// 07.10.2026 цену на InHome Comfort 4D подняли на 6 610 тенге, мы уехали со второго
+// места на восьмое, продажи упали с одиннадцати штук в день до двух - и заметили это
+// только на третьи сутки, когда владелец сказал «продажи встали».
+function CardChanges({ changes }) {
+  if (!changes) return null;
+
+  if (!changes.previous) {
+    return (
+      <div className="alert" style={{ marginBottom: 16 }}>
+        Ежедневная проверка мест ещё не набрала историю
+        {changes.today ? <> — первый срез сделан {dateLabel(changes.today)}, сравнивать будет с чем завтра.</> : '.'}
+      </div>
+    );
+  }
+
+  const worse = changes.data.filter((c) => c.worse);
+  const rest = changes.data.filter((c) => !c.worse);
+
+  if (changes.data.length === 0) {
+    return (
+      <div className="alert alert-ok" style={{ marginBottom: 16 }}>
+        С {dateLabel(changes.previous)} на карточках ничего не сдвинулось — проверено {changes.checked} позиций.
+      </div>
+    );
+  }
+
+  return (
+    <Panel
+      title="Что изменилось на карточках"
+      note={`Сравнение замера от ${dateLabel(changes.today)} с предыдущим от ${dateLabel(changes.previous)}. Проверено позиций: ${changes.checked}.`}
+    >
+      {worse.length > 0 && (
+        <div className="alert alert-error" style={{ marginBottom: 14 }}>
+          Стало хуже у {worse.length} {plural(worse.length, 'позиции', 'позиций', 'позиций')} — они первыми в списке.
+        </div>
+      )}
+      <table className="data">
+        <thead>
+          <tr>
+            <th>Товар</th>
+            <th className="ta-r">Место</th>
+            <th className="ta-r">Наша цена</th>
+            <th className="ta-r">Дешевле всех</th>
+            <th className="ta-r">Дороже рынка</th>
+          </tr>
+        </thead>
+        <tbody>
+          {[...worse, ...rest].map((c) => (
+            <tr key={`${c.storeId}:${c.sku}`}>
+              <td>
+                {c.worse && <span className="place place-out" style={{ marginRight: 8 }}>хуже</span>}
+                {c.name}
+                <div className="t-faint" style={{ fontSize: 12 }}>{c.storeName}</div>
+              </td>
+              <td className="num ta-r">
+                <Move
+                  was={c.wasPlace === null ? 'нас не было' : `${c.wasPlace}`}
+                  now={c.place === null ? 'нас нет' : `${c.place} из ${c.offersTotal}`}
+                  bad={c.worse}
+                />
+              </td>
+              <td className="num ta-r">
+                <Move was={money(c.wasOurPrice)} now={money(c.ourPrice)} bad={false} />
+              </td>
+              <td className="num ta-r t-dim">
+                <Move was={money(c.wasBestPrice)} now={money(c.bestPrice)} bad={false} />
+              </td>
+              <td className="num ta-r">
+                {c.gap === null
+                  ? <span className="t-faint">—</span>
+                  : c.gap > 0
+                    ? <span data-loss>{money(c.gap)}</span>
+                    : <span className="t-faint">самые дешёвые</span>}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </Panel>
+  );
+}
+
+// «Было -> стало» в одной ячейке. Стрелка словом, а не символом: в узкой колонке
+// с цифрами символьная стрелка сливается с минусом в отрицательном числе.
+function Move({ was, now, bad }) {
+  if (was === now) return <span>{now}</span>;
+  return (
+    <span>
+      <span className="t-faint" style={{ textDecoration: 'line-through' }}>{was}</span>
+      <span className="t-faint"> → </span>
+      <b data-loss={bad || undefined}>{now}</b>
+    </span>
+  );
+}
+
 const SORTS = [
   ['revenue', 'По выручке'],
   ['qty', 'По штукам'],
@@ -178,6 +275,7 @@ export default function SalesView({ range, storeId, stores = [] }) {
   const [category, setCategory] = useState(null);
   const [search, setSearch] = useState('');
   const [uploads, setUploads] = useState([]);
+  const [changes, setChanges] = useState(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState(null);
 
@@ -208,6 +306,17 @@ export default function SalesView({ range, storeId, stores = [] }) {
   }, []);
 
   useEffect(() => { loadUploads(); }, [loadUploads]);
+
+  const loadChanges = useCallback(async () => {
+    try {
+      const { data } = await api.get('/api/analytics/card-changes');
+      setChanges(data);
+    } catch {
+      setChanges(null);
+    }
+  }, []);
+
+  useEffect(() => { loadChanges(); }, [loadChanges]);
 
   // Товары, разложенные по категориям: раскрытая категория показывает свои позиции
   // прямо под собой. Раньше клик только фильтровал таблицу в самом низу страницы -
@@ -327,6 +436,8 @@ export default function SalesView({ range, storeId, stores = [] }) {
     <div className={loading ? 'is-reloading' : undefined}>
       {error && <div className="alert alert-error">{error}</div>}
       {notice && <div className="alert">{notice}</div>}
+
+      <CardChanges changes={changes} />
 
       <Uploads
         stores={stores}

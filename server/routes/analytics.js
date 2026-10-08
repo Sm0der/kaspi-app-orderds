@@ -656,6 +656,90 @@ async function latestCardStats(store) {
   return rows;
 }
 
+// GET /api/analytics/card-changes - что сдвинулось на карточках между двумя последними
+// замерами. Отдельным запросом, а не внутри /sales: это короткий список, он нужен
+// наверху экрана сразу, а /sales за два года считается шесть секунд.
+router.get('/card-changes', async (req, res, next) => {
+  try {
+    const days = await db.query(
+      `SELECT checked_day::text AS day FROM product_card_rank_history
+       GROUP BY 1 ORDER BY 1 DESC LIMIT 2`
+    );
+    if (days.rows.length < 2) {
+      return res.json({
+        data: [],
+        today: days.rows[0]?.day || null,
+        previous: null,
+        checked: 0,
+      });
+    }
+
+    const [today, previous] = days.rows.map((r) => r.day);
+    const { rows } = await db.query(
+      `SELECT n.store_id, n.sku, s.name AS store_name, p.name,
+              n.place, n.offers_total, n.our_price, n.best_price,
+              o.place AS was_place, o.offers_total AS was_total,
+              o.our_price AS was_our_price, o.best_price AS was_best_price
+       FROM product_card_rank_history n
+       JOIN product_card_rank_history o
+         ON o.checked_day = $2::date AND o.store_id = n.store_id AND o.sku = n.sku
+       JOIN stores s ON s.id = n.store_id
+       LEFT JOIN products p ON p.store_id = n.store_id AND p.sku = n.sku
+       WHERE n.checked_day = $1::date
+         AND (n.place IS DISTINCT FROM o.place
+              OR ROUND(COALESCE(n.our_price, -1)) <> ROUND(COALESCE(o.our_price, -1))
+              OR ROUND(COALESCE(n.best_price, -1)) <> ROUND(COALESCE(o.best_price, -1)))`,
+      [today, previous]
+    );
+
+    const num = (v) => (v === null || v === undefined ? null : Number(v));
+    const data = rows.map((r) => {
+      const place = r.place;
+      const wasPlace = r.was_place;
+      // Хуже стало, если ушли с карточки или уехали вниз по списку. Это и есть
+      // то, ради чего список существует: рост заметят и так, провал - нет.
+      const worse =
+        (wasPlace !== null && place === null) ||
+        (wasPlace !== null && place !== null && place > wasPlace);
+      return {
+        storeId: r.store_id,
+        storeName: r.store_name,
+        sku: r.sku,
+        name: r.name || r.sku,
+        place,
+        wasPlace,
+        offersTotal: r.offers_total,
+        ourPrice: num(r.our_price),
+        wasOurPrice: num(r.was_our_price),
+        bestPrice: num(r.best_price),
+        wasBestPrice: num(r.was_best_price),
+        gap:
+          num(r.our_price) !== null && num(r.best_price) !== null
+            ? Math.round(num(r.our_price) - num(r.best_price))
+            : null,
+        worse,
+      };
+    });
+
+    // Сверху провалы, внутри них - те, кто упал дальше всех
+    data.sort((a, b) => {
+      if (a.worse !== b.worse) return a.worse ? -1 : 1;
+      const fall = (x) =>
+        x.wasPlace !== null && x.place !== null ? x.place - x.wasPlace : x.place === null ? 99 : 0;
+      return fall(b) - fall(a);
+    });
+
+    const checked = await db.query(
+      'SELECT COUNT(*)::int AS n FROM product_card_rank_history WHERE checked_day = $1::date',
+      [today]
+    );
+
+    res.json({ data, today, previous, checked: checked.rows[0].n });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // Себестоимость каждого изделия - теми же формулами, что и раздел «Себестоимость»
 async function costPerProduct() {
   const { rows: products } = await db.query('SELECT * FROM cost_products');
