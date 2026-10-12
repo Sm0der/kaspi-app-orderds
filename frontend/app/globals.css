@@ -915,3 +915,16 @@ table.data tbody tr[data-selected] { background: var(--brass-wash); }
   transition: transform 0.14s var(--ease);
 }
 .disclosure[data-open] { transform: rotate(90deg); color: var(--brass-strong); }
+
+/* Итог по марже: пять чисел в строку, последнее - то, ради чего всё считалось.
+   Не плитками kpi: это не независимые показатели, а одна цепочка вычитаний,
+   и она должна читаться слева направо как арифметика. */
+.margin-total {
+  display: flex; flex-wrap: wrap; gap: 22px; align-items: baseline;
+  padding: 14px 16px; border: 1px solid var(--line); border-radius: var(--radius-sm);
+  background: var(--ink-800);
+}
+.margin-total > div { display: grid; gap: 2px; font-size: 13px; }
+.margin-total b { font-size: 16px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.margin-total-last { margin-left: auto; text-align: right; }
+.margin-total-last b { font-size: 20px; color: var(--brass-strong); }

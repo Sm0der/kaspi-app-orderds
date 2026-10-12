@@ -254,6 +254,159 @@ function Move({ was, now, bad }) {
   );
 }
 
+const MARGIN_SORTS = [
+  ['profit', 'Кто приносит больше'],
+  ['margin', 'По чистой марже'],
+  ['perUnit', 'По прибыли с штуки'],
+  ['worst', 'Худшие'],
+];
+
+// Маржа чистыми - после того, как Kaspi забрал своё.
+//
+// «Наценка» в остальных таблицах - это (выручка минус себестоимость) / выручка, и она
+// вводит в заблуждение: 37% наценки на шкафу превращаются в 11% на руки. Комиссию
+// Kaspi в API заказов не отдаёт вовсе, её считаем ставкой 11,75% (замерено по 1324
+// операциям Kaspi Pay, разброс меньше десятой доли процента), а доставка берётся
+// фактическая из самого заказа - она там есть и сошлась с выгрузкой в 1299 случаях
+// из 1300.
+//
+// Главная колонка здесь - «с штуки». Проценты показывают, насколько товар выгоден,
+// но решение «что двигать» принимается по тенге: комод Милан Дей оставляет 20 172
+// с продажи, а шкаф Aisha - 7 754, хотя выручки у Aisha вшестеро больше.
+function Margins({ products }) {
+  const [sort, setSort] = useState('profit');
+
+  const known = useMemo(
+    () => products.filter((p) => p.net && p.net.profit !== null && p.qty > 0),
+    [products]
+  );
+  const unknown = useMemo(
+    () => products.filter((p) => !p.net || p.net.profit === null),
+    [products]
+  );
+
+  const total = useMemo(
+    () => known.reduce(
+      (a, p) => ({
+        revenue: a.revenue + p.revenue,
+        cost: a.cost + p.cost,
+        fee: a.fee + p.net.fee,
+        delivery: a.delivery + p.net.delivery,
+        profit: a.profit + p.net.profit,
+      }),
+      { revenue: 0, cost: 0, fee: 0, delivery: 0, profit: 0 }
+    ),
+    [known]
+  );
+
+  const rows = useMemo(() => {
+    const by = {
+      profit: (p) => p.net.profit,
+      margin: (p) => p.net.margin,
+      perUnit: (p) => p.net.perUnit,
+      // Худшие считаем только там, где продажи были настоящие: одна штука с плохой
+      // маржой - это случайность, а не проблема ассортимента.
+      worst: (p) => (p.qty >= 3 ? -p.net.margin : Number.NEGATIVE_INFINITY),
+    }[sort];
+    return [...known].sort((a, b) => by(b) - by(a));
+  }, [known, sort]);
+
+  if (known.length === 0) {
+    return (
+      <Panel title="Маржа по позициям" note="Считается по товарам, связанным с изделием в «Себестоимости».">
+        <p className="t-dim" style={{ margin: 0 }}>
+          За этот период нет ни одной позиции с известной себестоимостью — связать их можно в «Себестоимости».
+        </p>
+      </Panel>
+    );
+  }
+
+  const share = (v) => (total.revenue > 0 ? Math.round((v / total.revenue) * 1000) / 10 : 0);
+
+  return (
+    <Panel
+      title="Маржа по позициям"
+      note="Чистыми — после комиссии Kaspi и доставки. Комиссию API заказов не отдаёт, берём ставку 11,75%
+            (замерено по выгрузке Kaspi Pay). Доставка фактическая, из самого заказа."
+    >
+      <div className="margin-total">
+        <div><span className="t-dim">Выручка</span><b className="num">{money(total.revenue)} ₸</b></div>
+        <div><span className="t-dim">Себестоимость</span><b className="num">−{money(total.cost)} ₸ <span className="t-faint">{pct(share(total.cost))}</span></b></div>
+        <div><span className="t-dim">Комиссия Kaspi</span><b className="num">−{money(total.fee)} ₸ <span className="t-faint">{pct(share(total.fee))}</span></b></div>
+        <div><span className="t-dim">Доставка</span><b className="num">−{money(total.delivery)} ₸ <span className="t-faint">{pct(share(total.delivery))}</span></b></div>
+        <div className="margin-total-last">
+          <span className="t-dim">Остаётся</span>
+          <b className="num" data-loss={total.profit < 0 || undefined}>{money(total.profit)} ₸ <span>{pct(share(total.profit))}</span></b>
+        </div>
+      </div>
+
+      <div className="chip-row" style={{ margin: '14px 0' }}>
+        {MARGIN_SORTS.map(([key, label]) => (
+          <button key={key} className="chip" data-active={sort === key} onClick={() => setSort(key)}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      <table className="data">
+        <thead>
+          <tr>
+            <th>Товар</th>
+            <th className="ta-r">Штук</th>
+            <th className="ta-r">Выручка</th>
+            <th className="ta-r">Себестоимость</th>
+            <th className="ta-r">Комиссия</th>
+            <th className="ta-r">Доставка</th>
+            <th className="ta-r">Остаётся</th>
+            <th className="ta-r">Чистая маржа</th>
+            <th className="ta-r">С штуки</th>
+            <th className="ta-r">Доля прибыли</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((p) => (
+            <tr key={`${p.storeId}:${p.sku}`}>
+              <td>
+                <div>{p.name}</div>
+                <div className="t-faint" style={{ fontSize: 12 }}>
+                  {p.storeName}
+                  {p.costCode && <> · {p.costCode}</>}
+                  {' · наценка '}{pct(p.margin)}
+                </div>
+              </td>
+              <td className="num ta-r">{p.qty}</td>
+              <td className="num ta-r">{money(p.revenue)}</td>
+              <td className="num ta-r t-dim">{money(p.cost)}</td>
+              <td className="num ta-r t-dim">{money(p.net.fee)}</td>
+              <td className="num ta-r t-dim">{money(p.net.delivery)}</td>
+              <td className="num ta-r">
+                <b data-loss={p.net.profit < 0 || undefined}>{money(p.net.profit)}</b>
+              </td>
+              <td className="num ta-r">
+                <span className="share-bar" style={{ '--fill': `${Math.max(0, Math.min(100, p.net.margin * 2))}%` }}>
+                  <span data-loss={p.net.margin < 10 || undefined}>{pct(p.net.margin)}</span>
+                </span>
+              </td>
+              <td className="num ta-r"><b data-loss={p.net.perUnit < 0 || undefined}>{money(p.net.perUnit)}</b></td>
+              <td className="num ta-r t-dim">
+                {total.profit > 0 ? pct(Math.round((p.net.profit / total.profit) * 1000) / 10) : '—'}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      {unknown.length > 0 && (
+        <p className="t-dim" style={{ marginBottom: 0 }}>
+          Ещё {unknown.length} {plural(unknown.length, 'позиция', 'позиции', 'позиций')} на{' '}
+          {money(unknown.reduce((a, p) => a + p.revenue, 0))} ₸ не попали в расчёт — у них неизвестна
+          себестоимость. Свяжите их с изделием в «Себестоимости», и они встанут сюда.
+        </p>
+      )}
+    </Panel>
+  );
+}
+
 const SORTS = [
   ['revenue', 'По выручке'],
   ['qty', 'По штукам'],
@@ -503,6 +656,8 @@ export default function SalesView({ range, storeId, stores = [] }) {
           </tbody>
         </table>
       </Panel>
+
+      <Margins products={data.products} />
 
       {drop.length > 0 && (
         <Panel

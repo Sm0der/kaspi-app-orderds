@@ -31,6 +31,11 @@ const SCOPE = `
            ${HANDED_MS}::bigint AS handed_ms,
            o.ship_date, o.ship_date_first,
            (o.raw_data->'attributes'->>'totalPrice')::numeric AS total_price,
+           -- Сколько Kaspi удержал за доставку этого заказа. Не оценка: сверено с
+           -- выгрузкой Kaspi Pay, 1299 совпадений из 1300 (расходится один заказ,
+           -- где доставку в итоге не взяли). Комиссии в API нет вовсе, её считаем
+           -- ставкой, а доставка здесь - факт.
+           COALESCE((o.raw_data->'attributes'->>'deliveryCostForSeller')::numeric, 0) AS delivery,
            (o.raw_data->'attributes'->'deliveryAddress'->>'town') AS town,
            o.stage = 'cancelled' AS cancelled
     FROM orders o
@@ -349,6 +354,21 @@ router.get('/sales', async (req, res, next) => {
           ? Math.round(((revenue - unitCost * r.qty) / revenue) * 1000) / 10
           : null,
         costCode: found ? found.code : null,
+        // Чистыми - после того, как Kaspi забрал своё. В «наценке» выше этого нет,
+        // и разрыв большой: 35% наценки превращаются в 9-11% на руки.
+        net: (() => {
+          const fee = Math.round(revenue * KASPI_FEE);
+          const delivery = Math.round(Number(r.delivery) || 0);
+          if (unitCost === null) return { fee, delivery, profit: null, margin: null };
+          const profit = Math.round(revenue - unitCost * r.qty - fee - delivery);
+          return {
+            fee,
+            delivery,
+            profit,
+            margin: revenue > 0 ? Math.round((profit / revenue) * 1000) / 10 : null,
+            perUnit: r.qty > 0 ? Math.round(profit / r.qty) : null,
+          };
+        })(),
         cancelledQty: r.cancelled_qty,
         cancelShare: touched > 0 ? Math.round((r.cancelled_qty / touched) * 1000) / 10 : 0,
         lastSold: r.last_sold,
@@ -421,6 +441,11 @@ const ITEM_PRICE = "(oi.raw_data->'attributes'->>'totalPrice')::numeric";
 // магазинами или её пересоздают под новым артикулом - а это происходит регулярно.
 // Без него сравнение с прошлым периодом врёт: бестселлер, уехавший из одного магазина
 // в другой, в одном показывался как «новое», а в другом как падение на 83%.
+// Комиссия Kaspi. В API заказов её нет ни одним полем, поэтому ставка - замерено по
+// 1324 операциям Kaspi Pay за сентябрь: 11,73-11,81% во всех ценовых диапазонах, разброс
+// меньше десятой доли процента. Доставку так считать не надо, она лежит в самом заказе.
+const KASPI_FEE = 0.1175;
+
 const ITEM_CARD =
   "convert_from(decode(oi.raw_data->'relationships'->'product'->'data'->>'id', 'base64'), 'UTF8')";
 
@@ -451,6 +476,12 @@ function itemRows([from, to, store]) {
             COALESCE(SUM(oi.quantity) FILTER (WHERE NOT scope.cancelled), 0)::int AS qty,
             COALESCE(SUM(${ITEM_PRICE}) FILTER (WHERE NOT scope.cancelled), 0)::numeric AS revenue,
             COALESCE(SUM(oi.quantity) FILTER (WHERE scope.cancelled), 0)::int AS cancelled_qty,
+            -- Доставка у Kaspi одна на заказ, а в заказе бывает несколько разных
+            -- изделий - делим её между ними по доле в сумме заказа. Иначе у заказа
+            -- из двух позиций каждая унесла бы на себе полную доставку.
+            COALESCE(SUM(
+              ${ITEM_PRICE} / NULLIF(scope.total_price, 0) * scope.delivery
+            ) FILTER (WHERE NOT scope.cancelled), 0)::numeric AS delivery,
             MAX(scope.created_day) FILTER (WHERE NOT scope.cancelled)::text AS last_sold,
             MAX(p.cost_product_id) AS cost_product_id,
             MAX(s.name) AS store_name
