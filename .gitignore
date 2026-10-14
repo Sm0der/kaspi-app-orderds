@@ -34,3 +34,6 @@ yarn-error.log*
 # Misc
 .env.*.local
 .cache/
+
+# Еженедельные отчёты - генерируются скриптом, в git им не место
+server/reports/
