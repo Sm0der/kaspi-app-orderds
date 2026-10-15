@@ -228,8 +228,14 @@ const money = (v) => Math.round(Number(v) || 0).toLocaleString('ru-RU');
   const alertFile = path.join(logDir, 'card-alert.txt');
   try { fs.mkdirSync(logDir, { recursive: true }); } catch { /* уже есть */ }
 
+  // Разрыв между срезами печатаем всегда: компьютер владельца на выходных выключен,
+  // замер пропускается, и понедельничное сравнение идёт с пятницей. Это нормально,
+  // но «за сутки» и «за трое суток» - разные новости, и путать их нельзя.
+  const gapDays = Math.round((new Date(today + 'T00:00:00Z') - new Date(prev + 'T00:00:00Z')) / 86400000);
+  const span = gapDays > 1 ? ` (за ${gapDays} дн., замер пропускался)` : '';
+
   if (alerts.length === 0) {
-    console.log(`Сравнение ${prev} → ${today}: всё на местах, ходовые позиции продаются.`);
+    console.log(`Сравнение ${prev} → ${today}${span}: всё на местах, ходовые позиции продаются.`);
     try { fs.unlinkSync(alertFile); } catch { /* его и не было */ }
     await db.pool.end();
     return;
