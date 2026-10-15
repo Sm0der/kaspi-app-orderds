@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api, errorText } from '../lib/api';
+import PriceFight from './PriceFight';
 
 // Продажи в разрезе товара: что берут, в какой категории, сколько на этом остаётся и
 // на каком месте мы стоим на общей карточке Kaspi.
@@ -211,7 +212,7 @@ function CardChanges({ changes }) {
             <th className="ta-r">Место</th>
             <th className="ta-r">Наша цена</th>
             <th className="ta-r">Дешевле всех</th>
-            <th className="ta-r">Дороже рынка</th>
+            <th className="ta-r">Дороже рынка · что делать</th>
           </tr>
         </thead>
         <tbody>
@@ -241,6 +242,7 @@ function CardChanges({ changes }) {
                   : c.gap > 0
                     ? <span data-loss>{money(c.gap)}</span>
                     : <span className="t-faint">самые дешёвые</span>}
+                <div><PriceFight row={c} /></div>
               </td>
             </tr>
           ))}
@@ -750,7 +752,7 @@ export default function SalesView({ range, storeId, stores = [] }) {
               <th className="ta-r">Купили</th>
               <th className="ta-r">Доля карточки</th>
               <th className="ta-r">Место</th>
-              <th className="ta-r">Дороже рынка</th>
+              <th className="ta-r">Дороже рынка · что делать</th>
               <th className="ta-r">К прошлому</th>
               <th className="ta-r">Последняя продажа</th>
             </tr>

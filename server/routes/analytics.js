@@ -708,6 +708,31 @@ async function latestCardStats(store) {
   return rows;
 }
 
+// Фактическая доставка по карточке — из самих заказов, а не из таблицы ступеней.
+// Ступень зависит от габаритов и веса, угадывать её незачем: Kaspi уже сказал, сколько
+// взял, в raw_data.attributes.deliveryCostForSeller. Берём медиану по ОДНОТОВАРНЫМ
+// заказам: там вся доставка относится к одной позиции, делить ничего не нужно.
+async function deliveryByCard() {
+  const { rows } = await db.query(`
+    WITH single AS (
+      SELECT o.id,
+             COALESCE((o.raw_data->'attributes'->>'deliveryCostForSeller')::numeric, 0) AS ship
+      FROM orders o
+      WHERE o.stage <> 'cancelled'
+        AND to_timestamp((o.raw_data->'attributes'->>'creationDate')::bigint / 1000) >= NOW() - INTERVAL '180 days'
+        AND (SELECT COUNT(*) FROM order_items x WHERE x.order_id = o.id) = 1
+    )
+    SELECT convert_from(decode(oi.raw_data->'relationships'->'product'->'data'->>'id', 'base64'), 'UTF8') AS card_id,
+           percentile_disc(0.5) WITHIN GROUP (ORDER BY single.ship)::numeric AS ship,
+           COUNT(*)::int AS orders
+    FROM order_items oi
+    JOIN single ON single.id = oi.order_id
+    WHERE oi.raw_data->'relationships'->'product'->'data'->>'id' IS NOT NULL
+      AND single.ship > 0
+    GROUP BY 1`);
+  return new Map(rows.map((r) => [r.card_id, { ship: Number(r.ship), orders: r.orders }]));
+}
+
 // GET /api/analytics/card-changes - что сдвинулось на карточках между двумя последними
 // замерами. Отдельным запросом, а не внутри /sales: это короткий список, он нужен
 // наверху экрана сразу, а /sales за два года считается шесть секунд.
@@ -728,7 +753,7 @@ router.get('/card-changes', async (req, res, next) => {
 
     const [today, previous] = days.rows.map((r) => r.day);
     const { rows } = await db.query(
-      `SELECT n.store_id, n.sku, n.city_id, s.name AS store_name, p.name,
+      `SELECT n.store_id, n.sku, n.city_id, n.card_id, s.name AS store_name, p.name,
               n.place, n.offers_total, n.our_price, n.best_price,
               o.place AS was_place, o.offers_total AS was_total,
               o.our_price AS was_our_price, o.best_price AS was_best_price
@@ -744,6 +769,14 @@ router.get('/card-changes', async (req, res, next) => {
               OR ROUND(COALESCE(n.best_price, -1)) <> ROUND(COALESCE(o.best_price, -1)))`,
       [today, previous]
     );
+
+    // Себестоимость и фактическая доставка — чтобы панель отвечала не «нас обошли»,
+    // а «стоит ли догонять»: при цене конкурента столько-то останется с штуки.
+    const [costs, ships] = await Promise.all([costPerProduct(), deliveryByCard()]);
+    const { rows: linked } = await db.query(
+      `SELECT store_id, sku, cost_product_id FROM products WHERE cost_product_id IS NOT NULL`
+    );
+    const costBySku = new Map(linked.map((r) => [`${r.store_id}:${r.sku}`, r.cost_product_id]));
 
     const num = (v) => (v === null || v === undefined ? null : Number(v));
     const data = rows.map((r) => {
@@ -772,6 +805,21 @@ router.get('/card-changes', async (req, res, next) => {
             ? Math.round(num(r.our_price) - num(r.best_price))
             : null,
         worse,
+        // Всё, что нужно, чтобы посчитать прибыль при любой цене. Считает интерфейс:
+        // там крутят процент бонуса и сразу видят, что остаётся.
+        cost: (() => {
+          const id = costBySku.get(`${r.store_id}:${r.sku}`);
+          const c = id ? costs.get(id) : null;
+          return c && c.cost !== null ? c.cost : null;
+        })(),
+        delivery: (() => {
+          const d = ships.get(r.card_id);
+          return d ? d.ship : null;
+        })(),
+        deliveryOrders: (() => {
+          const d = ships.get(r.card_id);
+          return d ? d.orders : 0;
+        })(),
       };
     });
 
