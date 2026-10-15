@@ -4,6 +4,8 @@
 //   node scripts/weekly-report.js --week=2026-10-06    # неделя, в которую попадает дата
 //   node scripts/weekly-report.js --last7              # последние 7 дней, а не календарная неделя
 //   node scripts/weekly-report.js --out=путь.html      # куда положить (по умолчанию reports/)
+//   node scripts/weekly-report.js --xlsx=путь.xlsx     # книга Excel рядом с отчётом
+//   node scripts/weekly-report.js --no-xlsx            # только страница, без Excel
 //
 // Неделя считается ПОНЕДЕЛЬНИК-ВОСКРЕСЕНЬЕ по Алматы. День заказа берём из epoch
 // creationDate, а не из order_date: у старых заказов там UTC, у новых алматинская
@@ -584,6 +586,16 @@ if (require.main === module) {
     fs.mkdirSync(path.dirname(out), { recursive: true });
     fs.writeFileSync(out, renderHtml(data), 'utf8');
     console.log('\nОтчёт: ' + out);
+
+    // Книга Excel - только таблицы, без пояснений: её открывают, чтобы считать
+    // самому. exceljs стоит в devDependencies, потому что отчёт собирается с этого
+    // компьютера по расписанию и на Vercel никогда не запускается.
+    if (!has('no-xlsx')) {
+      const xlsxFile = arg('xlsx') || out.replace(/\.html$/, '.xlsx');
+      const { writeXlsx } = require('./weekly-report-xlsx');
+      await writeXlsx(data, xlsxFile);
+      console.log('Excel:  ' + xlsxFile);
+    }
 
     await db.pool.end();
   })().catch((e) => { console.error(e); process.exit(1); });

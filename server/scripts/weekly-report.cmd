@@ -8,7 +8,9 @@ rem Снять:
 rem   schtasks /delete /tn "ARTROOM nedelnyy otchet" /f
 rem
 rem Отчёт ложится в server\reports\nedelya-ГГГГ-ММ-ДД.html и сразу открывается
-rem в браузере. Текстовую версию дописываем в logs\weekly-report.log.
+rem в браузере. Тем же запуском рядом пишется nedelya-ГГГГ-ММ-ДД.xlsx - книга Excel
+rem без пояснений, одни таблицы: её открывают, чтобы считать самому.
+rem Текстовую версию дописываем в logs\weekly-report.log.
 rem
 rem Файл сохранён в кодировке cp866: cmd.exe читает .cmd в OEM-кодировке, и в UTF-8
 rem кириллица в комментариях рассыпалась бы на несуществующие команды.
