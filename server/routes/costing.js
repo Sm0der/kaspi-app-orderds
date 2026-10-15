@@ -265,6 +265,106 @@ router.put('/products/:id/skus', async (req, res, next) => {
   }
 });
 
+// ── калькулятор цены ──────────────────────────────────────────────────────────
+// Позиция «готовая сумма от владельца»: когда технолог ещё не сделал спецификацию,
+// себестоимость заводится ОДНОЙ строкой, а тарифы стоят в нуле. Так сделана серия
+// Accord, и так же работает правка себестоимости из калькулятора.
+const OWNER_COST_ITEM = 'Себестоимость с работой (задана владельцем)';
+
+// GET /api/costing/calculator - всё, что нужно калькулятору, одним запросом:
+// коды, себестоимость, привязанные артикулы Kaspi с их живой ценой.
+// Отдельный эндпоинт, а не /products: там нет цен Kaspi, а без них калькулятор
+// показывает «сколько должно быть» и молчит о том, сколько есть сейчас.
+router.get('/calculator', async (req, res, next) => {
+  try {
+    const { rows: products } = await db.query('SELECT * FROM cost_products ORDER BY code NULLS LAST, name');
+    const { rows: allLines } = await db.query(`
+      SELECT pi.product_id, pi.id AS line_id, pi.item_id, pi.quantity, pi.price,
+             i.kind, i.counts_as, i.name
+      FROM cost_product_items pi JOIN cost_items i ON i.id = pi.item_id`);
+    const { rows: skus } = await db.query(
+      `SELECT p.cost_product_id, p.sku, p.name, p.price, s.name AS store_name
+       FROM products p LEFT JOIN stores s ON s.id = p.store_id
+       WHERE p.cost_product_id IS NOT NULL ORDER BY p.name`
+    );
+
+    const byProduct = new Map();
+    for (const line of allLines) {
+      if (!byProduct.has(line.product_id)) byProduct.set(line.product_id, []);
+      byProduct.get(line.product_id).push(line);
+    }
+    const skusByProduct = new Map();
+    for (const s of skus) {
+      if (!skusByProduct.has(s.cost_product_id)) skusByProduct.set(s.cost_product_id, []);
+      skusByProduct.get(s.cost_product_id).push(s);
+    }
+
+    res.json({
+      products: products.map((p) => {
+        const lines = byProduct.get(p.id) || [];
+        const ownerLine = lines.find((l) => l.name === OWNER_COST_ITEM);
+        return {
+          id: p.id, code: p.code, name: p.name, category: p.category,
+          cost: lines.length ? calculate(p, lines).cost : null,
+          lines: lines.length,
+          // Править себестоимость одним числом можно только там, где настоящей
+          // спецификации нет: иначе правка затёрла бы работу технолога.
+          costEditable: lines.length === 0 || (lines.length === 1 && Boolean(ownerLine)),
+          ownerCost: ownerLine ? Number(ownerLine.quantity) * Number(ownerLine.price) : null,
+          skus: skusByProduct.get(p.id) || [],
+        };
+      }),
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// PUT /api/costing/products/:id/cost - готовая себестоимость одним числом.
+// Разрешаем только изделиям без спецификации технолога: у остальных сумма
+// складывается из материалов и тарифов, и одно число её не заменит.
+router.put('/products/:id/cost', async (req, res, next) => {
+  try {
+    const cost = Number(req.body.cost);
+    if (!(cost >= 0)) return res.status(400).json({ error: 'Себестоимость - число от 0' });
+
+    const { rows: lines } = await db.query(LINES_SQL, [req.params.id]);
+    const ownerLine = lines.find((l) => l.name === OWNER_COST_ITEM);
+    if (lines.length > 0 && !(lines.length === 1 && ownerLine)) {
+      return res.status(409).json({
+        error: 'У изделия есть спецификация технолога - себестоимость складывается из неё. Правьте строки спецификации.',
+      });
+    }
+
+    const { rows: item } = await db.query(
+      `INSERT INTO cost_items (name, unit, kind, position)
+       VALUES ($1, 'шт', 'material', 0)
+       ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
+       RETURNING id`,
+      [OWNER_COST_ITEM]
+    );
+    await db.query(
+      `INSERT INTO cost_product_items (product_id, item_id, quantity, price)
+       VALUES ($1, $2, 1, $3)
+       ON CONFLICT (product_id, item_id) DO UPDATE SET quantity = 1, price = EXCLUDED.price`,
+      [req.params.id, item[0].id, cost]
+    );
+    // Тарифы в ноль: иначе к заданной сумме сверху приклеятся распил и упаковка.
+    await db.query(
+      `UPDATE cost_products SET rate_saw = 0, rate_edge = 0, rate_pack = 0, rate_ship = 0,
+                                rate_overhead = 0, drilling_cost = 0, updated_at = NOW()
+       WHERE id = $1`,
+      [req.params.id]
+    );
+
+    const { rows: product } = await db.query('SELECT * FROM cost_products WHERE id = $1', [req.params.id]);
+    const { rows: fresh } = await db.query(LINES_SQL, [req.params.id]);
+    res.json({ ok: true, totals: calculate(product[0], fresh) });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // GET /api/costing/unlinked - товары Kaspi без изделия, чтобы связь можно было доделать
 router.get('/unlinked', async (req, res, next) => {
   try {
