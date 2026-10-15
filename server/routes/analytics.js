@@ -3,6 +3,7 @@ const router = express.Router();
 const db = require('../db/init');
 const { requireAdmin } = require('../middleware/requireAuth');
 const { calculate } = require('../services/costingMath');
+const { cityName, CITIES } = require('../services/kaspiCatalog');
 
 // Аналитика для владельца. Читает те же таблицы, что и рабочие разделы, ничего не пишет.
 //
@@ -247,11 +248,25 @@ router.get('/sales', async (req, res, next) => {
       categoryRows(prevArgs),
       itemRows(args),
       prevItemRows(prevArgs),
+      // Место считается по четырём городам (см. CITIES в services/kaspiCatalog.js):
+      // список предложений Kaspi собирает под город покупателя, и одно число без
+      // города врёт. Сворачиваем в то, что отвечает на вопрос владельца: лучшее
+      // место, худшее и в скольких городах мы первые.
       db.query(
-        `SELECT r.store_id, r.sku, r.card_id, r.place, r.offers_total,
-                r.our_price, r.best_price, r.best_seller, r.checked_at
+        `SELECT r.store_id, r.sku, MAX(r.card_id) AS card_id,
+                MIN(r.place) AS place,
+                MAX(r.place) AS place_worst,
+                COUNT(*) FILTER (WHERE r.place = 1)::int AS cities_first,
+                COUNT(*)::int AS cities_total,
+                COUNT(*) FILTER (WHERE r.place IS NULL)::int AS cities_absent,
+                MAX(r.offers_total) AS offers_total,
+                MIN(r.our_price) AS our_price,
+                MIN(r.best_price) AS best_price,
+                (ARRAY_AGG(r.best_seller ORDER BY r.best_price NULLS LAST))[1] AS best_seller,
+                MAX(r.checked_at) AS checked_at
          FROM product_card_ranks r
-         WHERE ($1::int IS NULL OR r.store_id = $1)`,
+         WHERE ($1::int IS NULL OR r.store_id = $1)
+         GROUP BY r.store_id, r.sku`,
         [store]
       ),
       costPerProduct(),
@@ -402,6 +417,12 @@ router.get('/sales', async (req, res, next) => {
         card: rank && {
           cardId: rank.card_id,
           place: rank.place,
+          // Место без города ничего не значит, поэтому рядом всегда идёт разброс:
+          // худшее место и в скольких городах из четырёх мы первые.
+          placeWorst: rank.place_worst,
+          citiesFirst: rank.cities_first,
+          citiesTotal: rank.cities_total,
+          citiesAbsent: rank.cities_absent,
           offersTotal: rank.offers_total,
           ourPrice: rank.our_price !== null ? Number(rank.our_price) : null,
           bestPrice: rank.best_price !== null ? Number(rank.best_price) : null,
@@ -707,13 +728,14 @@ router.get('/card-changes', async (req, res, next) => {
 
     const [today, previous] = days.rows.map((r) => r.day);
     const { rows } = await db.query(
-      `SELECT n.store_id, n.sku, s.name AS store_name, p.name,
+      `SELECT n.store_id, n.sku, n.city_id, s.name AS store_name, p.name,
               n.place, n.offers_total, n.our_price, n.best_price,
               o.place AS was_place, o.offers_total AS was_total,
               o.our_price AS was_our_price, o.best_price AS was_best_price
        FROM product_card_rank_history n
        JOIN product_card_rank_history o
          ON o.checked_day = $2::date AND o.store_id = n.store_id AND o.sku = n.sku
+        AND o.city_id = n.city_id
        JOIN stores s ON s.id = n.store_id
        LEFT JOIN products p ON p.store_id = n.store_id AND p.sku = n.sku
        WHERE n.checked_day = $1::date
@@ -736,6 +758,7 @@ router.get('/card-changes', async (req, res, next) => {
         storeId: r.store_id,
         storeName: r.store_name,
         sku: r.sku,
+        city: cityName(r.city_id),
         name: r.name || r.sku,
         place,
         wasPlace,
@@ -761,7 +784,8 @@ router.get('/card-changes', async (req, res, next) => {
     });
 
     const checked = await db.query(
-      'SELECT COUNT(*)::int AS n FROM product_card_rank_history WHERE checked_day = $1::date',
+      `SELECT COUNT(DISTINCT (store_id, sku))::int AS n FROM product_card_rank_history
+       WHERE checked_day = $1::date`,
       [today]
     );
 

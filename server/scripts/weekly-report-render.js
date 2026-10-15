@@ -79,14 +79,16 @@ function renderText(d) {
   if (d.rank.days.length < 2) {
     line('  Срезов за неделю меньше двух — сравнивать не с чем.');
   } else {
-    line('  Замеры ' + d.rank.first + ' → ' + d.rank.last + ', в тройке лидеров ' + d.rank.top3 + ' позиций, ниже десятого ' + d.rank.deep.length + '.');
+    line('  Замеры ' + d.rank.first + ' → ' + d.rank.last + ', города: ' + d.rank.cities +
+         '. Первые везде: ' + d.rank.firstEverywhere + ', первые хоть где-то: ' + d.rank.firstSomewhere +
+         ', ниже десятого хоть где-то: ' + d.rank.deep.length + '.');
     for (const r of d.rank.moves.slice(0, 10)) {
       const price = r.price_was && r.price_now && r.price_was !== r.price_now
         ? '  цена ' + m(r.price_was) + ' → ' + m(r.price_now) : '';
       line('    ' + (r.shift > 0 ? '↑' : '↓') + ' ' + short(r.name, 40).padEnd(42) +
-           ('место ' + r.place_was + ' → ' + r.place_now).padEnd(18) + price);
+           ('первых городов ' + r.first_was + ' → ' + r.first_now + ' из ' + r.cities_total).padEnd(26) + price);
     }
-    if (d.rank.gone.length) line('    пропали с карточек: ' + d.rank.gone.map((r) => short(r.name, 28)).join(', '));
+    if (d.rank.gone.length) line('    пропали со всех городов: ' + d.rank.gone.map((r) => short(r.name, 28)).join(', '));
   }
 
   rule('ОТМЕНЫ И ВОЗВРАТЫ');
@@ -465,27 +467,35 @@ ${d.disappeared.length ? `
 
 <h2>Места на карточках</h2>
 ${d.rank.days.length < 2 ? '<p>Срезов за неделю меньше двух — сравнивать не с чем.</p>' : `
-<p>Замеры ${esc(d.rank.first)} → ${esc(d.rank.last)}. В тройке лидеров <strong>${esc(d.rank.top3)}</strong> позиций,
-   ниже десятого места <strong>${esc(d.rank.deep.length)}</strong> — туда покупатель не доходит.</p>
+<p>Замеры ${esc(d.rank.first)} → ${esc(d.rank.last)} по <strong>${esc(d.rank.cities)}</strong> городам.
+   Место на карточке считается отдельно для каждого города: список продавцов Kaspi собирает под город
+   покупателя, и кто туда не возит — в нём не появляется. Поэтому «первое место» без города ничего не значит.</p>
+<div class="grid">
+  ${kpi('Первые везде', m(d.rank.firstEverywhere), 'поз.', 'во всех ' + d.rank.cities + ' городах', 'up')}
+  ${kpi('Первые хоть где-то', m(d.rank.firstSomewhere), 'поз.', 'минимум в одном городе')}
+  ${kpi('Ниже десятого', m(d.rank.deep.length), 'поз.', 'хоть в одном городе', d.rank.deep.length ? 'down' : 'up')}
+  ${kpi('Пропали везде', m(d.rank.gone.length), 'поз.', 'предложения нет ни в одном городе', d.rank.gone.length ? 'down' : 'up')}
+</div>
 <div class="scroll"><table>
-  <thead><tr><th>Позиция</th><th class="n">Место</th><th class="n">Наша цена</th><th class="n">Лучшая на карточке</th><th>Кто дешевле</th></tr></thead>
+  <thead><tr><th>Позиция</th><th class="n">Первых городов</th><th class="n">Лучшее / худшее место</th><th class="n">Наша цена</th><th class="n">Лучшая на карточке</th><th>Кто дешевле</th></tr></thead>
   <tbody>
   ${rows(d.rank.moves.slice(0, 14), (r) => [
     '<td>' + esc(short(r.name, 48)) + '</td>',
-    '<td class="n"><span class="chip ' + (r.shift > 0 ? 'up' : 'down') + '">' + esc(r.place_was + ' → ' + r.place_now) + '</span></td>',
+    '<td class="n"><span class="chip ' + (r.shift > 0 ? 'up' : 'down') + '">' + esc(r.first_was + ' → ' + r.first_now + ' из ' + r.cities_total) + '</span></td>',
+    n((r.place_now ?? '—') + ' / ' + (r.worst_now ?? 'нет')),
     n(r.price_was !== r.price_now ? m(r.price_was) + ' → ' + m(r.price_now) : m(r.price_now)),
     n(r.best_price === null ? '—' : m(r.best_price) + ' ₸'),
     '<td class="muted">' + esc(r.best_price && r.price_now && r.best_price < r.price_now ? (r.best_seller || '') : '') + '</td>',
   ])}
   </tbody>
 </table></div>
-${d.rank.gone.length ? '<p><strong>Пропали с карточек:</strong> ' + d.rank.gone.map((r) => esc(short(r.name, 34))).join(', ') + '.</p>' : ''}
+${d.rank.gone.length ? '<p><strong>Пропали со всех городов:</strong> ' + d.rank.gone.map((r) => esc(short(r.name, 34))).join(', ') + '.</p>' : ''}
 ${d.rank.deep.length ? `
-<h3>Ниже десятого места</h3>
+<h3>Ниже десятого места хотя бы в одном городе</h3>
 <div class="scroll"><table>
-  <thead><tr><th>Позиция</th><th class="n">Место</th><th class="n">Продавцов</th><th class="n">Наша цена</th><th class="n">Лучшая</th></tr></thead>
+  <thead><tr><th>Позиция</th><th class="n">Худшее место</th><th class="n">Лучшее</th><th class="n">Первых городов</th><th class="n">Продавцов</th><th class="n">Наша цена</th><th class="n">Лучшая</th></tr></thead>
   <tbody>
-  ${rows(d.rank.deep.slice(0, 10), (r) => ['<td>' + esc(short(r.name, 48)) + '</td>', n(r.place_now), n(r.offers_total), n(m(r.price_now) + ' ₸'), n(r.best_price === null ? '—' : m(r.best_price) + ' ₸')])}
+  ${rows(d.rank.deep.slice(0, 10), (r) => ['<td>' + esc(short(r.name, 48)) + '</td>', n(r.worst_now), n(r.place_now ?? '—'), n(r.first_now + ' из ' + r.cities_total), n(r.offers_total), n(m(r.price_now) + ' ₸'), n(r.best_price === null ? '—' : m(r.best_price) + ' ₸')])}
   </tbody>
 </table></div>` : ''}`}
 
@@ -611,11 +621,11 @@ ${!d.ads.usd ? '<p>За эту неделю на рекламу не потра�
 <h2>Что с этим делать</h2>
 <ul class="todo">
   ${d.rank.gone.length ? '<li>Вернуть в продажу пропавшие с карточек: ' + d.rank.gone.map((r) => esc(short(r.name, 30))).join(', ') + '.</li>' : ''}
-  ${d.rank.moves.filter((r) => r.shift < -1 && r.price_now > r.price_was).slice(0, 3).map((r) =>
+  ${d.rank.moves.filter((r) => r.shift < 0 && r.price_now > r.price_was).slice(0, 3).map((r) =>
     '<li>' + esc(short(r.name, 44)) + ': цену подняли ' + esc(m(r.price_was)) + ' → ' + esc(m(r.price_now)) +
-    ', место ушло с ' + esc(r.place_was) + '-го на ' + esc(r.place_now) + '-е. Вернуть или смириться с местом.</li>').join('')}
+    ', первых городов стало ' + esc(r.first_now) + ' вместо ' + esc(r.first_was) + '. Вернуть или смириться.</li>').join('')}
   ${d.disappeared.slice(0, 3).map((r) => '<li>Проверить остаток: ' + esc(short(r.name, 40)) + ' давала ' + esc(m(r.revenue)) + ' ₸ в неделю и перестала.</li>').join('')}
-  ${d.rank.deep.slice(0, 2).map((r) => '<li>' + esc(short(r.name, 40)) + ' стоит ' + esc(r.place_now) + '-м из ' + esc(r.offers_total) +
+  ${d.rank.deep.slice(0, 2).map((r) => '<li>' + esc(short(r.name, 40)) + ' в худшем городе стоит ' + esc(r.worst_now) + '-м из ' + esc(r.offers_total) +
     '. Либо цена ' + esc(r.best_price === null ? '' : 'ниже ' + m(r.best_price) + ' ₸') + ', либо позиция не нужна.</li>').join('')}
   ${g.prod.total - g.prod.linked > 0 ? '<li>Проставить коды технолога оставшимся ' + esc(g.prod.total - g.prod.linked) + ' артикулам — тогда прибыль будет считаться по всей выручке, а не по ' + esc(M.coverage.toFixed(0)) + '%.</li>' : ''}
   ${num(d.log.over_week) > 0 ? '<li>Разобрать ' + esc(d.log.over_week) + ' заказ(ов), которые отгружались дольше недели.</li>' : ''}

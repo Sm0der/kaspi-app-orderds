@@ -7,6 +7,10 @@
 // каждое утро с 7 октября, но молча: 12 октября шкаф IMPERIAL Алёна исчез с карточки,
 // и заметили это на пятый день - 760 тысяч тенге выручки.
 //
+// Место считается по четырём городам (CITIES в services/kaspiCatalog.js): список
+// предложений Kaspi собирает под город покупателя, и одно число без города врёт.
+// Поэтому тревожим не по «месту», а по тому, в скольких городах мы первые.
+//
 // Ловим три вещи, и вторая важнее первой:
 //   1. позиция пропала из выдачи или провалилась ниже пятого места;
 //   2. позиция ПРОДАВАЛАСЬ и перестала, даже если место на вид в порядке. У IMPERIAL
@@ -80,16 +84,33 @@ const money = (v) => Math.round(Number(v) || 0).toLocaleString('ru-RU');
          AND to_timestamp((o.raw_data->'attributes'->>'creationDate')::bigint/1000) >= NOW() - INTERVAL '60 days'
        GROUP BY 1
      ),
-     -- одна карточка — две наши витрины, берём лучшее место из двух
-     best AS (
-       SELECT card_id, checked_day, MIN(place) AS place
+     -- Одна карточка — две наши витрины И ЧЕТЫРЕ ГОРОДА. По витринам берём лучшее
+     -- место (предложение одно, просто выставлено дважды), а города НЕ схлопываем
+     -- в одно число: список предложений Kaspi собирает под город покупателя, и
+     -- «первые в трёх городах из четырёх» — это не то же самое, что «первые».
+     -- Поэтому считаем, в скольких городах мы первые и в скольких нас вовсе нет.
+     per_city AS (
+       SELECT card_id, checked_day, city_id, MIN(place) AS place
        FROM product_card_rank_history
        WHERE checked_day IN ($1::date, $2::date)
-       GROUP BY 1, 2
+       GROUP BY 1, 2, 3
+     ),
+     best AS (
+       SELECT card_id, checked_day,
+              MIN(place) AS place,
+              MAX(place) AS place_worst,
+              COUNT(*) FILTER (WHERE place = 1)::int AS cities_first,
+              COUNT(*) FILTER (WHERE place IS NULL)::int AS cities_absent,
+              COUNT(*)::int AS cities_total
+       FROM per_city GROUP BY 1, 2
      )
      SELECT s.name AS store, p.name,
             n.sku, n.card_id,
             bn.place AS place_now, bo.place AS place_was,
+            bn.place_worst AS worst_now, bo.place_worst AS worst_was,
+            bn.cities_first AS first_now, bo.cities_first AS first_was,
+            bn.cities_absent AS absent_now, bo.cities_absent AS absent_was,
+            bn.cities_total AS cities_total, bo.cities_total AS cities_was_total,
             n.our_price AS price_now, o.our_price AS price_was,
             n.best_price, n.offers_total,
             COALESCE(sa.qty30, 0) AS qty30, COALESCE(sa.sum30, 0) AS sum30,
@@ -97,16 +118,23 @@ const money = (v) => Math.round(Number(v) || 0).toLocaleString('ru-RU');
             (CURRENT_DATE - sa.last_sale) AS silent_days
      FROM product_card_rank_history n
      JOIN product_card_rank_history o
-       ON o.store_id = n.store_id AND o.sku = n.sku AND o.checked_day = $2::date
+       ON o.store_id = n.store_id AND o.sku = n.sku AND o.city_id = n.city_id
+      AND o.checked_day = $2::date
      JOIN stores s ON s.id = n.store_id
      LEFT JOIN products p ON p.store_id = n.store_id AND p.sku = n.sku
      LEFT JOIN sales sa ON sa.card_id = n.card_id
      LEFT JOIN best bn ON bn.card_id = n.card_id AND bn.checked_day = $1::date
      LEFT JOIN best bo ON bo.card_id = n.card_id AND bo.checked_day = $2::date
      WHERE n.checked_day = $1::date
-       -- карточка попадает сюда один раз, даже когда мы стоим на ней из обоих магазинов
+       -- Карточка попадает сюда ОДИН раз: цена и название у неё одни, а мест теперь
+       -- четыре (по городу) и витрин две. Строку-представителя берём из наименьшего
+       -- магазина и наименьшего города, а всё, что зависит от города, уже посчитано
+       -- в best: сколько городов первых, в скольких нас нет, лучшее и худшее место.
        AND n.store_id = (SELECT MIN(store_id) FROM product_card_rank_history x
-                         WHERE x.card_id = n.card_id AND x.checked_day = $1::date)`,
+                         WHERE x.card_id = n.card_id AND x.checked_day = $1::date)
+       AND n.city_id = (SELECT MIN(city_id) FROM product_card_rank_history x
+                        WHERE x.card_id = n.card_id AND x.checked_day = $1::date
+                          AND x.store_id = n.store_id)`,
     [today, prev]
   );
 
@@ -118,26 +146,52 @@ const money = (v) => Math.round(Number(v) || 0).toLocaleString('ru-RU');
     const name = (r.name || r.sku || '?').replace(/\s+/g, ' ').trim();
     const lost = money(Number(r.sum30) / 30);
 
-    if (r.place_was !== null && r.place_now === null) {
+    const cities = Number(r.cities_total) || 1;
+    // Сравнивать «первые в N городах» можно только когда городов в обоих срезах
+    // поровну. 15.10.2026 замер стал четырёхгородским, и сравнение с однодневным
+    // прошлым дало бы чушь в обе стороны. Такие дни молчат по городам, но правило
+    // «продавалась и перестала» работает и там - оно про заказы, а не про место.
+    const sameCoverage = Number(r.cities_was_total || r.cities_total) === cities;
+    const priceUp = r.price_now && r.price_was && Number(r.price_now) > Number(r.price_was);
+    const priceNote = priceUp ? `, цену подняли ${money(r.price_was)} → ${money(r.price_now)}` : '';
+
+    // Пропала — значит пропала ВЕЗДЕ. Исчезновение в одном городе из четырёх это не
+    // «сняли с продажи», а «в этот город кто-то начал возить»; оно ловится ниже.
+    if (sameCoverage && Number(r.absent_now) === cities && Number(r.absent_was) < cities) {
       alerts.push({
         level: 1,
         head: 'ПРОПАЛА С КАРТОЧКИ',
         name, store: r.store,
-        why: `было место ${r.place_was}, теперь нашего предложения нет вовсе — снято с продажи или кончился остаток`,
+        why: `нашего предложения нет ни в одном из ${cities} городов — снято с продажи или кончился остаток`,
         lost,
       });
       continue;
     }
 
-    if (r.place_now !== null && r.place_was !== null &&
-        r.place_now > DEEP_PLACE && r.place_now - r.place_was >= 2) {
-      const priceUp = r.price_now && r.price_was && Number(r.price_now) > Number(r.price_was);
+    // Потеряли первое место в городах. Это и есть главный сигнал: «место 2» в среднем
+    // по больнице ничего не говорит, а «были первыми в четырёх городах, стали в одном» —
+    // говорит всё.
+    if (sameCoverage && Number(r.first_was) > Number(r.first_now)) {
+      alerts.push({
+        level: 2,
+        head: 'ПОТЕРЯЛИ ПЕРВОЕ МЕСТО',
+        name, store: r.store,
+        why: `были первыми в ${r.first_was} городах из ${cities}, стали в ${r.first_now}` +
+             `. Худшее место ${r.worst_now ?? 'нет предложения'}${priceNote}`,
+        lost,
+      });
+      continue;
+    }
+
+    // Провалились глубоко хотя бы где-то: ниже пятого места покупатель не доходит.
+    if (sameCoverage && r.worst_now !== null && r.worst_was !== null &&
+        r.worst_now > DEEP_PLACE && r.worst_now - r.worst_was >= 2) {
       alerts.push({
         level: 2,
         head: 'ПРОВАЛИЛАСЬ В ВЫДАЧЕ',
         name, store: r.store,
-        why: `место ${r.place_was} → ${r.place_now} из ${r.offers_total}` +
-             (priceUp ? `, цену подняли ${money(r.price_was)} → ${money(r.price_now)}` : ''),
+        why: `худшее место ${r.worst_was} → ${r.worst_now} из ${r.offers_total}` +
+             `, первые в ${r.first_now} городах из ${cities}${priceNote}`,
         lost,
       });
       continue;
@@ -149,19 +203,19 @@ const money = (v) => Math.round(Number(v) || 0).toLocaleString('ru-RU');
         head: 'ПРОДАВАЛАСЬ И ПЕРЕСТАЛА',
         name, store: r.store,
         why: `последний заказ ${r.last_sale}, это ${r.silent_days} дн. назад, а раньше брали ` +
-             `${perDay.toFixed(1)} шт в день. Место ${r.place_now ?? 'нет'} — проверить остаток и цену`,
+             `${perDay.toFixed(1)} шт в день. Первые в ${r.first_now} городах из ${cities}, ` +
+             `худшее место ${r.worst_now ?? 'нет предложения'} — проверить остаток и цену`,
         lost,
       });
       continue;
     }
 
-    if (r.price_now && r.price_was && Number(r.price_now) > Number(r.price_was) &&
-        r.place_now !== null && r.place_was !== null && r.place_now > r.place_was) {
+    if (priceUp && r.worst_now !== null && r.worst_was !== null && r.worst_now > r.worst_was) {
       alerts.push({
         level: 3,
         head: 'цену подняли — место упало',
         name, store: r.store,
-        why: `${money(r.price_was)} → ${money(r.price_now)} ₸, место ${r.place_was} → ${r.place_now}` +
+        why: `${money(r.price_was)} → ${money(r.price_now)} ₸, худшее место ${r.worst_was} → ${r.worst_now}` +
              (r.best_price ? `, лучшая на карточке ${money(r.best_price)}` : ''),
         lost,
       });

@@ -23,7 +23,26 @@ const axios = require('axios');
 // node scripts/fetch-product-images.js (см. комментарий в начале скрипта).
 const SEARCH_URL = 'https://kaspi.kz/yml/product-view/pl/filters';
 const OFFERS_URL = 'https://kaspi.kz/yml/offer-view/offers';
+
+// ГОРОД МЕНЯЕТ ОТВЕТ, и сильно. Список предложений Kaspi собирает под город покупателя:
+// продавец, который туда не возит, в нём не появляется вовсе. Замерено 15.10.2026:
+// шкаф InHome Comfort 4D за 89 000 ₸ стоит ПЕРВЫМ в 14 городах из 15 и третьим только
+// в Алматы; Aisha Pro 1103 - первая в 13 из 15, хуже только в Алматы и Шымкенте.
+// Пока здесь был зашит один Алматы, отчёты называли «местом» место в городе, который
+// даёт 11,4% наших заказов и где конкуренция самая плотная.
+//
+// Опорные четыре: Астана - больше всего заказов (16,7%), Алматы - самый трудный,
+// Шымкент - второй по расхождению, Караганда - за регионы. У обеих проверенных
+// карточек двенадцать региональных городов дали ОДИНАКОВЫЙ результат, поэтому
+// region их и представляет; если расхождения пойдут - добавить сюда ещё.
+const CITIES = [
+  { id: '710000000', name: 'Астана', share: 16.7 },
+  { id: '750000000', name: 'Алматы', share: 11.4 },
+  { id: '511010000', name: 'Шымкент', share: 5.6 },
+  { id: '351010000', name: 'Караганда', share: 7.6, region: true },
+];
 const ALMATY_CITY_ID = '750000000';
+const cityName = (id) => (CITIES.find((c) => c.id === String(id)) || {}).name || String(id);
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 1200;
 
@@ -66,11 +85,13 @@ async function searchCards(text, page = 0) {
 // Предложения продавцов по карточке: merchantId, merchantSku, цена.
 // Отдаётся страницами по 20 и сортируется по цене, поэтому у ходовой модели своё
 // предложение может лежать на второй-третьей странице - вызывающий обходит их сам.
-async function cardOffers(cardId, page = 0) {
+// Город обязателен к осознанному выбору: по умолчанию Алматы, но «место» без города
+// ничего не значит (см. CITIES выше).
+async function cardOffers(cardId, page = 0, cityId = ALMATY_CITY_ID) {
   return withRetries(async () => {
     const { data } = await client.post(
       `${OFFERS_URL}/${cardId}`,
-      { cityId: ALMATY_CITY_ID, id: String(cardId), merchantUID: '', limit: 20, page, sort: true, installationId: '-1' },
+      { cityId: String(cityId), id: String(cardId), merchantUID: '', limit: 20, page, sort: true, installationId: '-1' },
       { headers: { 'Content-Type': 'application/json', Referer: `https://kaspi.kz/shop/p/-${cardId}/` } }
     );
     return data?.offers || [];
@@ -101,4 +122,4 @@ async function cardImageById(cardId) {
   });
 }
 
-module.exports = { searchCards, cardOffers, cardImage, cardImageById };
+module.exports = { searchCards, cardOffers, cardImage, cardImageById, CITIES, ALMATY_CITY_ID, cityName };

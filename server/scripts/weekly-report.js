@@ -263,13 +263,25 @@ async function ranks(from, to) {
   const first = days[0];
   const last = days[days.length - 1];
   const { rows } = await db.query(
-    `WITH best AS (
-       SELECT card_id, checked_day::text AS d, MIN(place) AS place,
+    `WITH per_city AS (
+       SELECT card_id, checked_day::text AS d, city_id, MIN(place) AS place,
               MIN(our_price) AS our_price, MIN(best_price) AS best_price,
               MAX(offers_total) AS offers_total, MIN(best_seller) AS best_seller
        FROM product_card_rank_history
        WHERE checked_day IN ($1::date, $2::date)
-       GROUP BY 1, 2
+       GROUP BY 1, 2, 3
+     ),
+     -- Города НЕ схлопываем в одно число: список предложений Kaspi собирает под
+     -- город покупателя, и «первые в трёх городах из четырёх» — это не «вторые».
+     best AS (
+       SELECT card_id, d, MIN(place) AS place, MAX(place) AS place_worst,
+              COUNT(*) FILTER (WHERE place = 1)::int AS cities_first,
+              COUNT(*) FILTER (WHERE place IS NULL)::int AS cities_absent,
+              COUNT(*)::int AS cities_total,
+              MIN(our_price) AS our_price, MIN(best_price) AS best_price,
+              MAX(offers_total) AS offers_total,
+              (ARRAY_AGG(best_seller ORDER BY best_price NULLS LAST))[1] AS best_seller
+       FROM per_city GROUP BY 1, 2
      ),
      named AS (
        SELECT DISTINCT ON (h.card_id) h.card_id, COALESCE(p.name, h.sku) AS name
@@ -279,6 +291,9 @@ async function ranks(from, to) {
      )
      SELECT COALESCE(n.name, a.card_id) AS name, a.card_id,
             a.place AS place_was, b.place AS place_now,
+            a.place_worst AS worst_was, b.place_worst AS worst_now,
+            a.cities_first AS first_was, b.cities_first AS first_now,
+            b.cities_absent AS absent_now, b.cities_total AS cities_total,
             a.our_price AS price_was, b.our_price AS price_now,
             b.best_price, b.offers_total, b.best_seller
      FROM best a
@@ -292,16 +307,23 @@ async function ranks(from, to) {
     r.price_now = r.price_now === null ? null : num(r.price_now);
     r.best_price = r.best_price === null ? null : num(r.best_price);
   }
+  // Движение теперь считаем по числу городов, где мы первые: это то, что меняет
+  // продажи. Место «2» само по себе не говорит ничего, пока не сказано, где.
   const moves = rows
-    .filter((r) => r.place_was !== null && r.place_now !== null && r.place_was !== r.place_now)
-    .map((r) => ({ ...r, shift: r.place_was - r.place_now }))
-    .sort((a, b) => Math.abs(b.shift) - Math.abs(a.shift));
-  const gone = rows.filter((r) => r.place_was !== null && r.place_now === null);
+    .filter((r) => r.first_was !== null && r.first_now !== null && r.first_was !== r.first_now)
+    .map((r) => ({ ...r, shift: r.first_now - r.first_was }))
+    .sort((a, b) => Math.abs(b.shift) - Math.abs(a.shift) || (a.first_now - b.first_now));
+  const cities = rows[0] ? Number(rows[0].cities_total) : 1;
+  const gone = rows.filter((r) => Number(r.absent_now) === cities && r.place_was !== null);
   const back = rows.filter((r) => r.place_was === null && r.place_now !== null);
-  const deep = rows.filter((r) => r.place_now !== null && r.place_now > 10)
-    .sort((a, b) => b.place_now - a.place_now);
+  // «Глубоко» теперь про худший город: если хоть где-то ниже десятого - там нас нет
+  const deep = rows.filter((r) => r.worst_now !== null && r.worst_now > 10)
+    .sort((a, b) => b.worst_now - a.worst_now);
   const top3 = rows.filter((r) => r.place_now !== null && r.place_now <= 3).length;
-  return { days, first, last, moves, gone, back, deep, top3, all: rows };
+  const firstEverywhere = rows.filter((r) => Number(r.first_now) === cities).length;
+  const firstSomewhere = rows.filter((r) => Number(r.first_now) > 0).length;
+  return { days, first, last, moves, gone, back, deep, top3, cities,
+    firstEverywhere, firstSomewhere, all: rows };
 }
 
 // Тревоги, которые скрипт поднимал за неделю.

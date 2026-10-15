@@ -55,9 +55,14 @@ function Change({ value, isNew, byCard }) {
 // Место на карточке - главная цифра этого экрана, поэтому не просто число, а значок
 // с понятной раскраской: первые три места видно покупателю сразу, дальше надо
 // разворачивать список продавцов, а «нас нет» означает, что товар не показывают вообще.
+// МЕСТА БЕЗ ГОРОДА НЕ СУЩЕСТВУЕТ. Список продавцов Kaspi собирает под город
+// покупателя: кто туда не возит, в нём не появляется. Один и тот же шкаф за одну
+// и ту же цену бывает первым в Астане и третьим в Алматы, поэтому показываем не
+// одно число, а лучшее место и в скольких городах из четырёх мы первые.
 function Place({ card }) {
   if (!card) return <span className="t-faint" title="товар ещё не проверяли">—</span>;
-  if (card.place === null) {
+  const cities = card.citiesTotal || 1;
+  if (card.citiesAbsent === cities || card.place === null) {
     return (
       <span className="place place-out" title={`${card.offersTotal} чужих предложений на карточке`}>
         нас нет
@@ -65,19 +70,23 @@ function Place({ card }) {
     );
   }
   const tone = card.place <= 3 ? 'top' : card.place <= 10 ? 'mid' : 'low';
+  const even = card.placeWorst === card.place;
   return (
     <span
       className="place"
       data-tone={tone}
       title={
-        card.gap === null
-          ? 'других продавцов на карточке нет'
+        `первые в ${card.citiesFirst} городах из ${cities}` +
+        (even ? '' : `, место от ${card.place} до ${card.placeWorst} в зависимости от города`) +
+        (card.gap === null
+          ? ''
           : card.gap > 0
-            ? `дешевле всех ${money(card.bestPrice)} ₸ — мы дороже на ${money(card.gap)} ₸`
-            : 'мы самые дешёвые на карточке'
+            ? ` · дешевле всех ${money(card.bestPrice)} ₸ — мы дороже на ${money(card.gap)} ₸`
+            : ' · мы самые дешёвые на карточке')
       }
     >
-      {card.place} <span className="place-of">из {card.offersTotal}</span>
+      {even ? card.place : `${card.place}–${card.placeWorst}`}
+      <span className="place-of"> · первые в {card.citiesFirst} из {cities}</span>
     </span>
   );
 }
@@ -207,11 +216,11 @@ function CardChanges({ changes }) {
         </thead>
         <tbody>
           {[...worse, ...rest].map((c) => (
-            <tr key={`${c.storeId}:${c.sku}`}>
+            <tr key={`${c.storeId}:${c.sku}:${c.city}`}>
               <td>
                 {c.worse && <span className="place place-out" style={{ marginRight: 8 }}>хуже</span>}
                 {c.name}
-                <div className="t-faint" style={{ fontSize: 12 }}>{c.storeName}</div>
+                <div className="t-faint" style={{ fontSize: 12 }}>{c.storeName} · {c.city}</div>
               </td>
               <td className="num ta-r">
                 <Move
