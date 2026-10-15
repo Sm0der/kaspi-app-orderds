@@ -105,6 +105,54 @@ function renderText(d) {
     for (const s of lg.stuck.slice(0, 5)) line('    ' + s.d + '  ' + s.order_code + '  ' + m(s.total) + ' ₸  ' + s.stage + '  ' + s.store);
   }
 
+  rule('РЕКЛАМА И ПРОДАЖИ');
+  const A = d.ads;
+  const P = d.payback;
+  if (!A.usd) {
+    line('  За неделю на рекламу не потрачено ничего.');
+  } else {
+    line('  расход         ' + A.usd.toFixed(2).padStart(10) + ' $   = ' + m(A.kzt) + ' ₸,  это ' + P.share.toFixed(2) + '% выручки');
+    line('  переходов      ' + String(A.clicks).padStart(10) + '     по ' + m(A.cpc) + ' ₸,  CTR ' + (A.ctr || 0).toFixed(2) + '%,  CPM ' + m(A.cpm) + ' ₸');
+    line('  показов        ' + String(A.impressions).padStart(10));
+    line('');
+    line('  куда вели:');
+    for (const x of A.dest) {
+      line('    ' + x.destination.padEnd(22) + m(x.kzt).padStart(10) + ' ₸  ' + String(x.clicks).padStart(6) + ' переходов по ' +
+           m(x.cpc) + ' ₸,  CTR ' + (x.ctr || 0).toFixed(2) + '%');
+    }
+    line('');
+    line('  ВАЛОВЫЙ ROAS ' + (P.grossRoas === null ? '—' : P.grossRoas.toFixed(0) + ' ₸ выручки на вложенный тенге') + ' — цифра бесполезная:');
+    line('  пикселя на Kaspi нет, покупки к объявлениям не привязаны, и она приписывает рекламе всю выручку.');
+    line('  Считать надо порог:');
+    line('    прибыль с заказа            ' + m(P.netPerOrder).padStart(10) + ' ₸');
+    line('    заказов, чтобы отбить       ' + (P.ordersNeeded === null ? '—' : P.ordersNeeded.toFixed(1).padStart(10)) +
+         '     это ' + (P.ordersNeededShare === null ? '—' : P.ordersNeededShare.toFixed(1) + '% всех ' + d.now.all.orders + ' заказов недели'));
+    line('    нужна конверсия перехода    ' + (P.conversionNeeded === null ? '—' : P.conversionNeeded.toFixed(2).padStart(10) + '%') +
+         '     замеренная конверсия карточки ' + P.conversionMeasured + '%');
+    line('    ' + (P.conversionNeeded !== null && P.conversionNeeded < P.conversionMeasured
+      ? 'Порог ниже замеренной конверсии — реклама окупилась с запасом в ' + (P.conversionMeasured / P.conversionNeeded).toFixed(1) + ' раза.'
+      : 'Порог ВЫШЕ замеренной конверсии — такой расход не отбивается.'));
+  }
+
+  rule('РЕКЛАМА И ВЫРУЧКА ПО НЕДЕЛЯМ');
+  line('  неделя                 расход        выручка   доля   заказов   валовый ROAS');
+  for (const w of d.adsWeeks) {
+    line('  ' + (human(w.from) + ' — ' + human(w.to)).padEnd(24) +
+         (w.kzt ? m(w.kzt) + ' ₸' : '—').padStart(11) +
+         m(w.revenue).padStart(14) + ' ₸' +
+         (w.kzt ? w.share.toFixed(2) + '%' : '—').padStart(8) +
+         String(w.orders).padStart(9) +
+         (w.roas === null ? '—' : m(w.roas)).padStart(14));
+  }
+
+  rule('РЕКЛАМА И ВЫРУЧКА ПО МЕСЯЦАМ');
+  line('  месяц        расход        выручка   доля   заказов   валовый ROAS');
+  for (const w of d.adsMonths) {
+    line('  ' + w.mon.padEnd(10) + m(w.kzt).padStart(10) + ' ₸' + m(w.revenue).padStart(14) + ' ₸' +
+         (w.share.toFixed(2) + '%').padStart(8) + String(w.orders).padStart(9) +
+         (w.roas === null ? '—' : m(w.roas)).padStart(14));
+  }
+
   rule('ЧЕГО НЕ ХВАТАЕТ В ДАННЫХ');
   const g = d.gaps;
   line('  себестоимость известна у ' + g.prod.linked + ' артикулов из ' + g.prod.total +
@@ -485,6 +533,70 @@ ${d.alerts.length ? `
     '<td><strong>' + esc(x.title) + '</strong><div class="muted" style="white-space:pre-line;font-size:13px">' + esc(x.message) + '</div></td>'])}
   </tbody>
 </table></div>` : ''}
+
+<h2>Реклама и продажи</h2>
+${!d.ads.usd ? '<p>За эту неделю на рекламу не потрачено ничего.</p>' : `
+<div class="grid">
+  ${kpi('Расход', m(d.ads.kzt), '₸', d.ads.usd.toFixed(2) + ' $ · ' + d.payback.share.toFixed(2) + '% выручки')}
+  ${kpi('Переходов', m(d.ads.clicks), '', 'по ' + m(d.ads.cpc) + ' ₸ · CTR ' + (d.ads.ctr || 0).toFixed(2) + '%')}
+  ${kpi('Нужно заказов', d.payback.ordersNeeded === null ? '—' : d.payback.ordersNeeded.toFixed(1), '', 'чтобы вернуть вложенное — ' + (d.payback.ordersNeededShare === null ? '—' : d.payback.ordersNeededShare.toFixed(1) + '% всех заказов'))}
+  ${kpi('Нужна конверсия', d.payback.conversionNeeded === null ? '—' : d.payback.conversionNeeded.toFixed(2) + '%', '',
+    'замеренная у карточки ' + d.payback.conversionMeasured + '%',
+    d.payback.conversionNeeded !== null && d.payback.conversionNeeded < d.payback.conversionMeasured ? 'up' : 'down')}
+</div>
+
+<div class="note">
+  <strong>ROAS по этой рекламе посчитать нельзя, и это не пробел в данных.</strong>
+  Пиксель на Kaspi не поставить — это чужой сайт, поэтому ни одна покупка не привязана
+  к объявлению. Валовый ROAS ${esc(d.payback.grossRoas === null ? '—' : m(d.payback.grossRoas))} ₸ выручки
+  на вложенный тенге печатаем только как масштаб: он приписывает рекламе всю выручку, включая
+  заказы, которые пришли бы и без неё.
+  Решение принимают по порогу: прибыль с заказа ${esc(m(d.payback.netPerOrder))} ₸, значит расход
+  отбивают ${esc(d.payback.ordersNeeded === null ? '—' : d.payback.ordersNeeded.toFixed(1))} заказов,
+  а для этого нужна конверсия перехода ${esc(d.payback.conversionNeeded === null ? '—' : d.payback.conversionNeeded.toFixed(2) + '%')}.
+  ${d.payback.conversionNeeded !== null && d.payback.conversionNeeded < d.payback.conversionMeasured
+    ? 'Замеренная конверсия нашей карточки — ' + d.payback.conversionMeasured + '%, то есть порог взят с запасом в '
+      + (d.payback.conversionMeasured / d.payback.conversionNeeded).toFixed(1) + ' раза.'
+    : 'Замеренная конверсия нашей карточки — ' + d.payback.conversionMeasured + '%, то есть такой расход не отбивается.'}
+</div>
+
+<h3>Куда вела реклама</h3>
+<p>Назначение берём у группы объявлений, а не цель у кампании: цель задаётся на кампании,
+   назначение — на группе, и они расходятся молча. Переходы в профиль Instagram и в переписку
+   до карточки Kaspi не доходят.</p>
+<div class="scroll"><table>
+  <thead><tr><th>Направление</th><th class="n">Расход</th><th class="n">Доля</th><th class="n">Переходов</th><th class="n">Цена перехода</th><th class="n">CTR</th><th class="n">Кампаний</th></tr></thead>
+  <tbody>
+  ${rows(d.ads.dest, (x) => ['<td>' + esc(x.destination) + '</td>', n(m(x.kzt) + ' ₸'),
+    n(pct(x.usd, d.ads.usd).toFixed(0) + '%'), n(m(x.clicks)), n(m(x.cpc) + ' ₸'),
+    n((x.ctr || 0).toFixed(2) + '%'), n(x.campaigns)])}
+  </tbody>
+</table></div>`}
+
+<h3>Реклама и выручка по неделям</h3>
+<p>Восемь недель подряд. Расход на рекламу скачет в разы, выручка — нет: если бы связь была,
+   столбцы шли бы рядом.</p>
+<div class="scroll"><table>
+  <thead><tr><th>Неделя</th><th class="n">Расход</th><th class="n">Выручка</th><th class="n">Доля расхода</th><th class="n">Заказов</th><th class="n">Валовый ROAS</th></tr></thead>
+  <tbody>
+  ${rows(d.adsWeeks, (w) => ['<td>' + esc(human(w.from) + ' — ' + human(w.to)) + '</td>',
+    n(w.kzt ? m(w.kzt) + ' ₸' : '—'), n(m(w.revenue) + ' ₸'),
+    n(w.kzt ? w.share.toFixed(2) + '%' : '—'), n(w.orders),
+    n(w.roas === null ? '—' : m(w.roas))])}
+  </tbody>
+</table></div>
+<h3>Реклама и выручка по месяцам</h3>
+<p>Вся история расхода. На месяцах видно главное: самый большой расход и самая большая выручка
+   приходятся на разные месяцы.</p>
+<div class="scroll"><table>
+  <thead><tr><th>Месяц</th><th class="n">Расход</th><th class="n">Переходов</th><th class="n">Выручка</th><th class="n">Доля расхода</th><th class="n">Заказов</th><th class="n">Валовый ROAS</th></tr></thead>
+  <tbody>
+  ${rows(d.adsMonths, (w) => ['<td>' + esc(w.mon) + '</td>', n(m(w.kzt) + ' ₸'), n(m(w.clicks)),
+    n(m(w.revenue) + ' ₸'), n(w.share.toFixed(2) + '%'), n(w.orders), n(w.roas === null ? '—' : m(w.roas))])}
+  </tbody>
+</table></div>
+<p class="muted">Курс пересчёта — ${esc(d.USD_KZT)} ₸ за доллар. Meta выставляет счёт в долларах;
+   на долях процента оборота точность курса ничего не меняет.</p>
 
 <h2>Чего не хватает в данных</h2>
 <p>Отчёт обязан говорить, по какой части он молчит. Иначе «прибыль за неделю» читается как факт,

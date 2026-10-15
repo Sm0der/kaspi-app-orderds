@@ -315,6 +315,122 @@ async function alerts(from, to) {
   return rows;
 }
 
+// ── реклама ───────────────────────────────────────────────────────────────────
+// Meta выставляет счёт в долларах; в тенге пересчитываем одним курсом, чтобы цифры
+// в отчёте можно было складывать с выручкой. Курс грубый и это нормально: расход
+// на рекламу — доли процента оборота, и сотня тенге на доллар ничего не решает.
+const USD_KZT = 449;
+
+// Куда ведёт группа объявлений. Цель кампании для этого не годится: она задаётся на
+// кампании, назначение — на группе, и они расходятся молча (кампания «Этно комод
+// 3.09 широкая» с целью ПРОДАЖИ ведёт в WhatsApp). Проверено 13.10.2026.
+const DESTINATION_RU = {
+  UNDEFINED: 'на карточку Kaspi',
+  INSTAGRAM_PROFILE: 'в профиль Instagram',
+  WHATSAPP: 'в переписку',
+  INSTAGRAM_DIRECT: 'в переписку',
+  MESSAGING_INSTAGRAM_DIRECT_WHATSAPP: 'в переписку',
+};
+const destinationRu = (d) => DESTINATION_RU[d] || 'прочее';
+
+async function adsFor(from, to) {
+  const { rows } = await db.query(
+    `SELECT destination_type, campaign_name,
+            SUM(spend_usd)::numeric AS usd,
+            SUM(impressions)::bigint AS impressions,
+            SUM(clicks)::bigint AS clicks,
+            SUM(outbound_clicks)::bigint AS outbound,
+            SUM(link_clicks)::bigint AS link_clicks
+     FROM ad_spend_daily
+     WHERE day BETWEEN $1::date AND $2::date
+     GROUP BY 1, 2`,
+    [from, to]
+  );
+  const byDest = new Map();
+  let usd = 0;
+  let impressions = 0;
+  let clicks = 0;
+  let outbound = 0;
+  for (const r of rows) {
+    const key = destinationRu(r.destination_type);
+    const d = byDest.get(key) || { destination: key, usd: 0, impressions: 0, clicks: 0, outbound: 0, campaigns: new Set() };
+    d.usd += num(r.usd); d.impressions += Number(r.impressions); d.clicks += Number(r.clicks); d.outbound += Number(r.outbound);
+    d.campaigns.add(r.campaign_name);
+    byDest.set(key, d);
+    usd += num(r.usd); impressions += Number(r.impressions); clicks += Number(r.clicks); outbound += Number(r.outbound);
+  }
+  const dest = [...byDest.values()].map((d) => ({
+    ...d, kzt: d.usd * USD_KZT, campaigns: d.campaigns.size,
+    cpc: d.clicks ? (d.usd * USD_KZT) / d.clicks : null,
+    ctr: d.impressions ? (d.clicks / d.impressions) * 100 : null,
+  })).sort((a, b) => b.usd - a.usd);
+  return {
+    usd, kzt: usd * USD_KZT, impressions, clicks, outbound, dest,
+    cpc: clicks ? (usd * USD_KZT) / clicks : null,
+    cpm: impressions ? ((usd * USD_KZT) / impressions) * 1000 : null,
+    ctr: impressions ? (clicks / impressions) * 100 : null,
+  };
+}
+
+// Реклама и продажи по НЕДЕЛЯМ — то, ради чего отчёт и затевался. Одна неделя
+// отношения расход/выручка не показывает: расход скачет втрое, выручка нет.
+async function adsVsSalesByWeek(lastMonday, weeks) {
+  const out = [];
+  for (let i = weeks - 1; i >= 0; i -= 1) {
+    const a = addDays(lastMonday, -7 * i);
+    const b = addDays(a, 6);
+    const [t, ad] = await Promise.all([totals(a, b), adsFor(a, b)]);
+    out.push({
+      from: a, to: b,
+      revenue: t.all.revenue, orders: t.all.orders,
+      usd: ad.usd, kzt: ad.kzt, clicks: ad.clicks,
+      share: t.all.revenue ? (ad.kzt / t.all.revenue) * 100 : 0,
+      roas: ad.kzt ? t.all.revenue / ad.kzt : null,
+    });
+  }
+  return out;
+}
+
+// То же самое по МЕСЯЦАМ: восемь недель показывают текущую картину, месяцы — всю
+// историю расхода. Именно на месяцах видно, что рекордный август сделан при вдвое
+// меньшем расходе, чем июль.
+async function adsVsSalesByMonth() {
+  const { rows } = await db.query(
+    `WITH ad AS (
+       SELECT to_char(day, 'YYYY-MM') AS mon,
+              SUM(spend_usd)::numeric AS usd, SUM(clicks)::bigint AS clicks
+       FROM ad_spend_daily GROUP BY 1
+     ),
+     sale AS (
+       SELECT to_char(${ORDER_DAY}, 'YYYY-MM') AS mon,
+              COALESCE(SUM(${ORDER_TOTAL}), 0)::numeric AS revenue,
+              COUNT(*)::int AS orders
+       FROM orders o
+       WHERE o.stage <> 'cancelled'
+         AND ${ORDER_DAY} >= (SELECT MIN(day) FROM ad_spend_daily)
+       GROUP BY 1
+     )
+     SELECT COALESCE(ad.mon, sale.mon) AS mon,
+            COALESCE(ad.usd, 0)::numeric AS usd, COALESCE(ad.clicks, 0)::bigint AS clicks,
+            COALESCE(sale.revenue, 0)::numeric AS revenue, COALESCE(sale.orders, 0)::int AS orders
+     FROM ad FULL JOIN sale ON sale.mon = ad.mon
+     -- месяцы, где расход был, а заказов в базе нет, — это период до заливки истории
+     -- (январь 2024). Строка «расход 45 883 ₸, выручка 0» читается как провал, хотя
+     -- это просто отсутствие данных.
+     WHERE COALESCE(ad.usd, 0) > 0 AND COALESCE(sale.orders, 0) > 0
+     ORDER BY 1`
+  );
+  return rows.map((r) => {
+    const kzt = num(r.usd) * USD_KZT;
+    return {
+      mon: r.mon, usd: num(r.usd), kzt, clicks: Number(r.clicks),
+      revenue: num(r.revenue), orders: r.orders,
+      share: num(r.revenue) ? (kzt / num(r.revenue)) * 100 : 0,
+      roas: kzt ? num(r.revenue) / kzt : null,
+    };
+  });
+}
+
 // Чего не хватает в данных. Отчёт обязан говорить, по какой части он молчит, -
 // иначе «прибыль 2 млн» читается как факт, хотя посчитана по половине выручки.
 async function gaps() {
@@ -369,6 +485,10 @@ async function collect(from, to) {
     logistics(from, to), ranks(addDays(from, -1), to), alerts(from, to), gaps(),
   ]);
 
+  const [ads, adsPrev, adsWeeks, adsMonths] = await Promise.all([
+    adsFor(from, to), adsFor(prevFrom, prevTo), adsVsSalesByWeek(from, 8), adsVsSalesByMonth(),
+  ]);
+
   // движение позиций неделя к неделе — по карточке
   const prevByCard = new Map(itemsPrev.map((r) => [r.card_id, r]));
   const nowCards = new Set(itemsNow.map((r) => r.card_id));
@@ -397,6 +517,26 @@ async function collect(from, to) {
   }
   const categories = [...catMap.values()].sort((a, b) => b.revenue - a.revenue);
 
+  // Окупаемость рекламы. ROAS в его обычном виде здесь посчитать НЕЛЬЗЯ: пиксель на
+  // Kaspi не поставить, это чужой сайт, поэтому ни одна покупка к объявлению не
+  // привязана (omni_purchase пуст у всех групп). Валовый ROAS «вся выручка делить на
+  // расход» печатаем только как масштаб — он приписывает рекламе и те заказы, которые
+  // пришли бы сами. Решение принимают по ПОРОГУ: сколько заказов реклама должна была
+  // принести, чтобы вернуть вложенное, и какая для этого нужна конверсия перехода.
+  const money = moneyBlock(itemsNow);
+  const netPerOrder = now.all.orders ? (money.netProjected / now.all.orders) : 0;
+  const payback = {
+    usd: ads.usd, kzt: ads.kzt, clicks: ads.clicks,
+    share: now.all.revenue ? (ads.kzt / now.all.revenue) * 100 : 0,
+    grossRoas: ads.kzt ? now.all.revenue / ads.kzt : null,
+    netPerOrder,
+    ordersNeeded: netPerOrder > 0 ? ads.kzt / netPerOrder : null,
+    ordersNeededShare: netPerOrder > 0 && now.all.orders ? (ads.kzt / netPerOrder / now.all.orders) * 100 : null,
+    conversionNeeded: netPerOrder > 0 && ads.clicks ? (ads.kzt / netPerOrder / ads.clicks) * 100 : null,
+    // замеренная конверсия нашей карточки — 0,47-0,49% (CLAUDE.md, замер 07.10.2026)
+    conversionMeasured: 0.48,
+  };
+
   // профиль дней недели по четырём предыдущим неделям — чтобы отличить провал от вторника
   const profileSeries = await daily(fourFrom, fourTo);
   const profile = RU_DOW.map((d) => {
@@ -407,7 +547,8 @@ async function collect(from, to) {
   return {
     from, to, prevFrom, prevTo, yearFrom, yearTo, fourFrom, fourTo,
     now, prev, year, four, series, prevSeries, profile,
-    money: moneyBlock(itemsNow), moneyPrev: moneyBlock(itemsPrev),
+    ads, adsPrev, adsWeeks, adsMonths, payback, USD_KZT,
+    money, moneyPrev: moneyBlock(itemsPrev),
     itemsNow, itemsPrev, movers, disappeared, categories,
     cancelNow, cancelPrev, log, rank, alerts: alertRows, gaps: gap,
     generated: new Date().toISOString(),
@@ -416,7 +557,7 @@ async function collect(from, to) {
 
 module.exports = {
   collect, addDays, mondayOf, iso, human, dow, m, pct, delta, sign, num,
-  COMMISSION, RU_DOW,
+  COMMISSION, RU_DOW, USD_KZT, destinationRu,
 };
 
 // ── запуск ────────────────────────────────────────────────────────────────────
