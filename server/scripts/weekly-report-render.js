@@ -35,6 +35,19 @@ function renderText(d) {
     line('    ' + s.store.padEnd(16) + m(s.revenue).padStart(12) + ' ₸  ' + String(s.orders).padStart(4) + ' зак.  средний ' + m(s.avg) + ' ₸');
   }
 
+  // Штука и место - разные единицы. Машину, грузчиков и склад занимают места:
+  // одна штука едет и пятью коробками, поэтому неделя «на 1000 штук» и неделя
+  // «на 1700 мест» - это разный объём работы при одной и той же выручке.
+  const B = d.boxes;
+  const Bp = d.boxesPrev;
+  line('');
+  line('  штук           ' + String(B.qty).padStart(12) + '      ' + sign(delta(B.qty, Bp.qty), 1));
+  line('  мест (коробок) ' + String(Math.round(B.boxes)).padStart(12) + '      ' + sign(delta(B.boxes, Bp.boxes), 1) +
+       (B.perUnit ? ',  по ' + B.perUnit.toFixed(2) + ' на штуку' : ''));
+  line('    места известны у ' + B.qtyKnown + ' штук из ' + B.qty + ' (' + B.coverage.toFixed(0) + '%)' +
+       (B.unknown ? ', у ' + B.unknown + ' позиций нет изделия склада' : '') +
+       (B.projected ? ';  со всеми было бы около ' + Math.round(B.projected) + ' мест' : ''));
+
   rule('ЧТО ОСТАЁТСЯ');
   const M = d.money;
   line('  выручка                 ' + m(M.revenue).padStart(12) + ' ₸');
@@ -56,9 +69,10 @@ function renderText(d) {
   }
 
   rule('ТОП ПО ДЕНЬГАМ');
-  line('  позиция                                        шт      выручка     остаётся   с штуки');
+  line('  позиция                                        шт  мест      выручка     остаётся   с штуки');
   for (const r of d.itemsNow.slice(0, 12)) {
-    line('  ' + short(r.name, 44).padEnd(46) + String(r.qty).padStart(4) + m(r.revenue).padStart(13) +
+    line('  ' + short(r.name, 44).padEnd(46) + String(r.qty).padStart(4) +
+         (r.boxes === null ? '     —' : String(r.boxes).padStart(6)) + m(r.revenue).padStart(13) +
          (r.net === null ? '            —' : m(r.net).padStart(13)) +
          (r.per_unit === null ? '         —' : m(r.per_unit).padStart(10)));
   }
@@ -338,6 +352,9 @@ function renderHtml(d) {
   ${kpi('Выручка', mln(a.revenue), '₸', chip(delta(a.revenue, p.revenue)) + ' к прошлой неделе', tone(delta(a.revenue, p.revenue)))}
   ${kpi('Заказов', m(a.orders), '', chip(delta(a.orders, p.orders)) + ' · средний чек ' + m(a.avg) + ' ₸')}
   ${kpi('Остаётся чистыми', mln(M.net), '₸', M.netRate.toFixed(1) + '% от посчитанной выручки')}
+  ${kpi('Мест (коробок)', m(Math.round(d.boxes.boxes)), '',
+    d.boxes.qty + ' шт' + (d.boxes.perUnit ? ' · по ' + d.boxes.perUnit.toFixed(2) + ' на штуку' : '') +
+    ' · посчитано по ' + d.boxes.coverage.toFixed(0) + '% штук')}
   ${kpi('Отмены', m(a.cancelled), 'шт', cancelShare.toFixed(1) + '% заказов' + (prevCancelShare ? ', было ' + prevCancelShare.toFixed(1) + '%' : ''), cancelShare > prevCancelShare ? 'down' : 'up')}
 </div>
 
@@ -402,12 +419,12 @@ ${barChart(d.series, d.profile)}
 <p>Считаем по карточке Kaspi, а не по артикулу: одна и та же позиция продаётся из двух наших витрин
    и при переезде получает новый артикул. «С штуки» — сколько остаётся после комиссии, доставки и себестоимости.</p>
 <div class="scroll"><table>
-  <thead><tr><th>Позиция</th><th>Код</th><th class="n">Шт</th><th class="n">Выручка</th><th class="n">Наценка</th><th class="n">Остаётся</th><th class="n">С штуки</th></tr></thead>
+  <thead><tr><th>Позиция</th><th>Код</th><th class="n">Шт</th><th class="n">Коробок</th><th class="n">Выручка</th><th class="n">Наценка</th><th class="n">Остаётся</th><th class="n">С штуки</th></tr></thead>
   <tbody>
   ${rows(d.itemsNow.slice(0, 20), (r) => [
     '<td>' + esc(short(r.name, 52)) + '<div class="muted" style="font-size:12.5px">' + esc(r.stores || '') + '</div></td>',
     '<td class="muted">' + esc(r.code || '—') + '</td>',
-    n(r.qty), n(m(r.revenue) + ' ₸'),
+    n(r.qty), n(r.boxes === null ? '—' : String(r.boxes)), n(m(r.revenue) + ' ₸'),
     n(r.markup === null ? '—' : r.markup.toFixed(0) + '%'),
     n(r.net === null ? '—' : m(r.net) + ' ₸'),
     n(r.per_unit === null ? '—' : m(r.per_unit) + ' ₸'),
@@ -457,10 +474,16 @@ ${d.disappeared.length ? `
 
 <h2>Категории</h2>
 <div class="scroll"><table>
-  <thead><tr><th>Категория</th><th class="n">Выручка</th><th class="n">Доля</th><th class="n">Штук</th><th class="n">Средняя цена</th><th class="n">Остаётся</th></tr></thead>
+  <thead><tr><th>Категория</th><th class="n">Выручка</th><th class="n">Доля</th><th class="n">Штук</th><th class="n">Коробок</th><th class="n">Средняя цена</th><th class="n">Остаётся</th></tr></thead>
   <tbody>
   ${rows(d.categories, (c) => ['<td>' + esc(c.category) + '</td>', n(m(c.revenue) + ' ₸'),
-    n(pct(c.revenue, M.revenue).toFixed(0) + '%'), n(c.qty), n(m(c.revenue / (c.qty || 1)) + ' ₸'),
+    n(pct(c.revenue, M.revenue).toFixed(0) + '%'), n(c.qty),
+    // коробки посчитаны не по всей категории — подписываем, по какой её части
+    (c.qtyBoxed
+      ? '<td class="n">' + c.boxes +
+        (c.qtyBoxed < c.qty ? ' <span class="muted">за ' + c.qtyBoxed + ' шт</span>' : '') + '</td>'
+      : n('—')),
+    n(m(c.revenue / (c.qty || 1)) + ' ₸'),
     n(c.known ? m(c.net) + ' ₸' : '—')])}
   </tbody>
 </table></div>

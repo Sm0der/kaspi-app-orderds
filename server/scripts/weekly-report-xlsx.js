@@ -86,13 +86,22 @@ function build(d) {
     { k: 'Покрытие себестоимостью, %', now: M.coverage, prev: d.moneyPrev.coverage, four: null, year: null },
     { k: 'Расход на рекламу, ₸', now: d.ads.kzt, prev: d.adsPrev.kzt, four: null, year: null },
     { k: 'Переходов из рекламы', now: d.ads.clicks, prev: d.adsPrev.clicks, four: null, year: null },
+    { k: 'Штук продано', now: d.boxes.qty, prev: d.boxesPrev.qty, four: null, year: null },
+    { k: 'Мест (коробок)', now: d.boxes.boxes, prev: d.boxesPrev.boxes, four: null, year: null },
+    { k: 'Коробок на штуку', now: d.boxes.perUnit, prev: d.boxesPrev.perUnit, four: null, year: null },
+    { k: 'Штук с известными местами', now: d.boxes.qtyKnown, prev: d.boxesPrev.qtyKnown, four: null, year: null },
+    { k: 'Покрытие местами, %', now: d.boxes.coverage, prev: d.boxesPrev.coverage, four: null, year: null },
   ]);
   // Проценты своим форматом — иначе 12,4 покажется как 12. Строки ищем по названию,
   // а не по номеру: номер ломается от любой вставки в список выше.
   const summary = book.getWorksheet('Сводка');
   summary.eachRow((row, i) => {
-    if (i === 1 || !String(row.getCell(1).value || '').endsWith(', %')) return;
-    for (const c of [2, 3, 4, 5]) row.getCell(c).numFmt = PERCENT;
+    if (i === 1) return;
+    const label = String(row.getCell(1).value || '');
+    // «Коробок на штуку» — 1,76, и в денежном формате оно округлилось бы до двух
+    const fmt = label.endsWith(', %') ? PERCENT : (label === 'Коробок на штуку' ? MONEY2 : null);
+    if (!fmt) return;
+    for (const c of [2, 3, 4, 5]) row.getCell(c).numFmt = fmt;
   });
 
   // ── Магазины ────────────────────────────────────────────────────────────────
@@ -144,6 +153,8 @@ function build(d) {
     { header: 'Магазины', key: 'stores', width: 26 },
     { header: 'Категория', key: 'category', width: 26 },
     { header: 'Штук', key: 'qty' },
+    { header: 'Коробок на штуку', key: 'boxes_per_unit', width: 16 },
+    { header: 'Коробок', key: 'boxes' },
     { header: 'Заказов', key: 'orders' },
     { header: 'Выручка, ₸', key: 'revenue', format: MONEY },
     { header: 'Доставка, ₸', key: 'ship', format: MONEY },
@@ -159,13 +170,14 @@ function build(d) {
     return {
       name: (r.name || '').replace(/\s+/g, ' ').trim(),
       code: r.code || '', card: r.card_id, stores: r.stores || '', category: r.category || '',
-      qty: r.qty, orders: r.orders, revenue: r.revenue, ship: r.ship, commission: r.commission,
+      qty: r.qty, boxes_per_unit: r.boxes_per_unit, boxes: r.boxes, orders: r.orders, revenue: r.revenue, ship: r.ship, commission: r.commission,
       cost: r.cost, net: r.net, per_unit: r.per_unit, markup: r.markup,
       was: was ? was.revenue : 0, delta: r.revenue - (was ? was.revenue : 0),
     };
   }));
   totalRow(goods, 'Итого', {
     qty: d.itemsNow.reduce((s, r) => s + r.qty, 0),
+    boxes: d.boxes.boxes,
     revenue: M.revenue, ship: M.ship, commission: M.commission, cost: M.cost, net: M.net,
   });
 
@@ -187,15 +199,19 @@ function build(d) {
     { header: 'Выручка, ₸', key: 'revenue', format: MONEY },
     { header: 'Доля, %', key: 'share', format: PERCENT },
     { header: 'Штук', key: 'qty' },
+    { header: 'Коробок', key: 'boxes' },
+    { header: 'Штук с известными местами', key: 'qty_boxed', width: 24 },
     { header: 'Средняя цена, ₸', key: 'avg', format: MONEY },
     { header: 'Остаётся, ₸', key: 'net', format: MONEY },
   ], d.categories.map((c) => ({
     category: c.category, revenue: c.revenue, share: pct(c.revenue, M.revenue),
-    qty: c.qty, avg: c.qty ? c.revenue / c.qty : 0, net: c.known ? c.net : null,
+    qty: c.qty, boxes: c.qtyBoxed ? c.boxes : null, qty_boxed: c.qtyBoxed,
+    avg: c.qty ? c.revenue / c.qty : 0, net: c.known ? c.net : null,
   })));
   totalRow(cats, 'Итого', {
     revenue: M.revenue, share: 100,
     qty: d.categories.reduce((s, c) => s + c.qty, 0),
+    boxes: d.boxes.boxes, qty_boxed: d.boxes.qtyKnown,
     net: d.categories.reduce((s, c) => s + (c.known ? c.net : 0), 0),
   });
 

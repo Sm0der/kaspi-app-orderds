@@ -318,6 +318,10 @@ router.get('/sales', async (req, res, next) => {
         category: r.category,
         orders: r.orders,
         qty: r.qty,
+        boxes: r.boxes,
+        // Сколько штук категории вообще умеет считать в местах - без этого «180 мест»
+        // читается как «всё», хотя половина категории могла остаться непосчитанной.
+        qtyBoxed: r.qty_boxed,
         revenue: Number(r.revenue),
         share: totalRevenue > 0 ? Math.round((Number(r.revenue) / totalRevenue) * 1000) / 10 : 0,
         avgPrice: r.qty > 0 ? Math.round(Number(r.revenue) / r.qty) : 0,
@@ -359,6 +363,10 @@ router.get('/sales', async (req, res, next) => {
         name: r.name,
         category: r.category,
         qty: r.qty,
+        // Мест уехало со склада. null - у артикула нет изделия склада, и сколько
+        // коробок он занимает, мы просто не знаем.
+        boxesPerUnit: r.boxes_per_unit ?? null,
+        boxes: r.boxes_per_unit ? r.qty * r.boxes_per_unit : null,
         revenue,
         avgPrice: r.qty > 0 ? Math.round(revenue / r.qty) : 0,
         // Маржа - только по связанным с «Себестоимостью». Без связи прочерк честнее,
@@ -436,10 +444,28 @@ router.get('/sales', async (req, res, next) => {
       };
     });
 
+    // Сводка по местам. Печатаем вместе с покрытием и проекцией: мест известно не у
+    // всех артикулов, и без этих двух цифр итог выглядит заниженным ровно настолько,
+    // насколько не хватает привязок к складу.
+    const boxedQty = productList.reduce((s, p) => s + (p.boxes === null ? 0 : p.qty), 0);
+    const boxesTotal = productList.reduce((s, p) => s + (p.boxes || 0), 0);
+    const totalQty = productList.reduce((s, p) => s + p.qty, 0);
+    const boxes = {
+      total: boxesTotal,
+      qty: totalQty,
+      qtyKnown: boxedQty,
+      coverage: totalQty > 0 ? Math.round((boxedQty / totalQty) * 1000) / 10 : 0,
+      perUnit: boxedQty > 0 ? Math.round((boxesTotal / boxedQty) * 100) / 100 : null,
+      // если у остальных столько же мест на штуку, всего уехало примерно столько
+      projected: boxedQty > 0 ? Math.round((boxesTotal / boxedQty) * totalQty) : null,
+      skusUnknown: productList.filter((p) => p.boxes === null).length,
+    };
+
     res.json({
       range: { from, to, store, days },
       previous: { from: prevArgs[0], to: prevArgs[1] },
       revenue: totalRevenue,
+      boxes,
       categories: categoryList,
       products: productList,
       drop: dropCandidates(productList, days),
@@ -470,6 +496,18 @@ const KASPI_FEE = 0.1175;
 const ITEM_CARD =
   "convert_from(decode(oi.raw_data->'relationships'->'product'->'data'->>'id', 'base64'), 'UTF8')";
 
+// Места (коробки). Штука и место - разные вещи: шкаф Турин 225 едет пятью коробками,
+// и машину, грузчиков и склад занимают именно места, а не штуки. Число мест висит на
+// ИЗДЕЛИИ склада (warehouse_items.boxes_per_unit), артикул привязан к изделию парой
+// (store_id, sku) с UNIQUE - поэтому join не размножает строки заказа.
+// Где привязки нет, мест НЕ СЧИТАЕМ: подставить единицу значило бы выдать незаполненное
+// поле за «едет одной коробкой», а таких артикулов 40 из 135. Вместо этого рядом везде
+// идёт покрытие: по какой доле проданного места известны.
+const BOXES_JOIN = `
+  LEFT JOIN warehouse_item_skus wis ON wis.store_id = scope.store_id AND wis.sku = oi.sku
+  LEFT JOIN warehouse_items wi ON wi.id = wis.warehouse_item_id`;
+const ITEM_BOXES = 'oi.quantity * wi.boxes_per_unit';
+
 function categoryRows([from, to, store]) {
   return db.query(
     `WITH ${SCOPE}
@@ -478,8 +516,11 @@ function categoryRows([from, to, store]) {
             COALESCE(SUM(oi.quantity) FILTER (WHERE NOT scope.cancelled), 0)::int AS qty,
             COALESCE(SUM(${ITEM_PRICE}) FILTER (WHERE NOT scope.cancelled), 0)::numeric AS revenue,
             COALESCE(SUM(oi.quantity) FILTER (WHERE scope.cancelled), 0)::int AS cancelled_qty,
-            COUNT(DISTINCT oi.sku)::int AS positions
+            COUNT(DISTINCT oi.sku)::int AS positions,
+            COALESCE(SUM(${ITEM_BOXES}) FILTER (WHERE NOT scope.cancelled), 0)::int AS boxes,
+            COALESCE(SUM(oi.quantity) FILTER (WHERE NOT scope.cancelled AND wi.id IS NOT NULL), 0)::int AS qty_boxed
      FROM scope JOIN order_items oi ON oi.order_id = scope.id
+     ${BOXES_JOIN}
      GROUP BY 1 ORDER BY revenue DESC`,
     [from, to, store]
   );
@@ -505,11 +546,13 @@ function itemRows([from, to, store]) {
             ) FILTER (WHERE NOT scope.cancelled), 0)::numeric AS delivery,
             MAX(scope.created_day) FILTER (WHERE NOT scope.cancelled)::text AS last_sold,
             MAX(p.cost_product_id) AS cost_product_id,
-            MAX(s.name) AS store_name
+            MAX(s.name) AS store_name,
+            MAX(wi.boxes_per_unit)::int AS boxes_per_unit
      FROM scope
      JOIN order_items oi ON oi.order_id = scope.id
      JOIN stores s ON s.id = scope.store_id
      LEFT JOIN products p ON p.sku = oi.sku AND p.store_id = scope.store_id
+     ${BOXES_JOIN}
      GROUP BY scope.store_id, oi.sku
      ORDER BY revenue DESC`,
     [from, to, store]

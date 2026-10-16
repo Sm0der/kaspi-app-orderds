@@ -170,17 +170,27 @@ async function items(from, to, costs) {
             SUM(ord.ship * CASE WHEN ord.total > 0 THEN ${ITEM_SUM} / ord.total ELSE 0 END)::numeric AS ship,
             COUNT(DISTINCT ord.id)::int AS orders,
             MAX(p.cost_product_id)::int AS cost_product_id,
-            MAX(oi.raw_data->'attributes'->'category'->>'title') AS category
+            MAX(oi.raw_data->'attributes'->'category'->>'title') AS category,
+            -- Мест (коробок) на штуку. Висит на ИЗДЕЛИИ склада, артикул привязан к нему
+            -- парой (store_id, sku) с UNIQUE, поэтому join не размножает строки.
+            MAX(wi.boxes_per_unit)::int AS boxes_per_unit
      FROM order_items oi
      JOIN ord ON ord.id = oi.order_id
      JOIN stores s ON s.id = ord.store_id
      LEFT JOIN products p ON p.store_id = ord.store_id AND p.sku = oi.sku
+     LEFT JOIN warehouse_item_skus wis ON wis.store_id = ord.store_id AND wis.sku = oi.sku
+     LEFT JOIN warehouse_items wi ON wi.id = wis.warehouse_item_id
      WHERE oi.raw_data->'relationships'->'product'->'data'->>'id' IS NOT NULL
      GROUP BY 1`,
     [from, to]
   );
   for (const r of rows) {
     r.qty = Number(r.qty); r.revenue = num(r.revenue); r.ship = num(r.ship);
+    // Места считаем только там, где артикул привязан к изделию склада. Подставить
+    // единицу нельзя: поле заполнено не у всех, и «1» значило бы «едет одной
+    // коробкой», а не «неизвестно».
+    r.boxes_per_unit = r.boxes_per_unit || null;
+    r.boxes = r.boxes_per_unit ? r.boxes_per_unit * r.qty : null;
     const c = r.cost_product_id ? costs.get(r.cost_product_id) : null;
     r.code = c ? c.code : null;
     r.unit_cost = c && c.cost !== null ? c.cost : null;
@@ -491,6 +501,24 @@ function moneyBlock(list) {
   };
 }
 
+// Места (коробки) за период. Штука и место - разные единицы, и склад с машиной
+// занимают именно места: шкаф Турин 225 едет пятью коробками. Число мест известно
+// не у всех артикулов, поэтому итог идёт с покрытием и проекцией - ровно как деньги.
+function boxBlock(list) {
+  const qty = list.reduce((a, r) => a + r.qty, 0);
+  const known = list.filter((r) => r.boxes !== null);
+  const qtyKnown = known.reduce((a, r) => a + r.qty, 0);
+  const boxes = known.reduce((a, r) => a + r.boxes, 0);
+  return {
+    qty, qtyKnown, boxes,
+    coverage: pct(qtyKnown, qty),
+    perUnit: qtyKnown ? boxes / qtyKnown : null,
+    projected: qtyKnown ? (boxes / qtyKnown) * qty : null,
+    multi: known.filter((r) => r.boxes_per_unit > 1).length,
+    unknown: list.length - known.length,
+  };
+}
+
 async function collect(from, to) {
   const prevFrom = addDays(from, -7);
   const prevTo = addDays(to, -7);
@@ -534,8 +562,9 @@ async function collect(from, to) {
   const catMap = new Map();
   for (const r of itemsNow) {
     const k = r.category || 'без категории';
-    const c = catMap.get(k) || { category: k, revenue: 0, qty: 0, net: 0, known: 0 };
+    const c = catMap.get(k) || { category: k, revenue: 0, qty: 0, net: 0, known: 0, boxes: 0, qtyBoxed: 0 };
     c.revenue += r.revenue; c.qty += r.qty;
+    if (r.boxes !== null) { c.boxes += r.boxes; c.qtyBoxed += r.qty; }
     if (r.net !== null) { c.net += r.net; c.known += r.revenue; }
     catMap.set(k, c);
   }
@@ -573,6 +602,7 @@ async function collect(from, to) {
     now, prev, year, four, series, prevSeries, profile,
     ads, adsPrev, adsWeeks, adsMonths, payback, USD_KZT,
     money, moneyPrev: moneyBlock(itemsPrev),
+    boxes: boxBlock(itemsNow), boxesPrev: boxBlock(itemsPrev),
     itemsNow, itemsPrev, movers, disappeared, categories,
     cancelNow, cancelPrev, log, rank, alerts: alertRows, gaps: gap,
     generated: new Date().toISOString(),

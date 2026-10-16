@@ -421,6 +421,7 @@ function Margins({ products }) {
 const SORTS = [
   ['revenue', 'По выручке'],
   ['qty', 'По штукам'],
+  ['boxes', 'По местам'],
   ['profit', 'По прибыли'],
   ['margin', 'По наценке'],
   ['cancel', 'По отказам'],
@@ -511,6 +512,7 @@ export default function SalesView({ range, storeId, stores = [] }) {
     const by = {
       revenue: (p) => p.revenue,
       qty: (p) => p.qty,
+      boxes: (p) => (p.boxes === null ? last : p.boxes),
       profit: (p) => (p.profit === null ? last : p.profit),
       margin: (p) => (p.margin === null ? last : p.margin),
       cancel: (p) => p.cancelShare,
@@ -620,6 +622,26 @@ export default function SalesView({ range, storeId, stores = [] }) {
           <div className="kpi-value num">{data.products.length}</div>
           <div className="kpi-label">Позиций продавалось</div>
         </div>
+        {data.boxes && (
+          <div className="kpi">
+            <div className="kpi-value num">
+              {money(data.boxes.total)}
+              <span className="t-dim" style={{ fontSize: 15 }}> коробок</span>
+            </div>
+            <div className="kpi-label">
+              {/* Штуки и места - разные цифры: одна штука едет и пятью коробками.
+                  Рядом всегда покрытие, иначе итог читается как полный. */}
+              {money(data.boxes.qtyKnown)} шт из {money(data.boxes.qty)}
+              {data.boxes.perUnit && <> · по {data.boxes.perUnit} на штуку</>}
+              {data.boxes.skusUnknown > 0 && (
+                <div className="t-faint" style={{ fontSize: 12 }}>
+                  у {data.boxes.skusUnknown} позиций мест нет в складе
+                  {data.boxes.projected ? <> · всего ≈ {money(data.boxes.projected)}</> : null}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
         <div className="kpi">
           <div className="kpi-value num">{categories.length}</div>
           <div className="kpi-label">
@@ -648,6 +670,7 @@ export default function SalesView({ range, storeId, stores = [] }) {
               <th className="ta-r">Выручка</th>
               <th className="ta-r">Доля</th>
               <th className="ta-r">Штук</th>
+              <th className="ta-r">Коробок</th>
               <th className="ta-r">Позиций</th>
               <th className="ta-r">Средняя цена</th>
               <th className="ta-r">Отказов</th>
@@ -745,6 +768,7 @@ export default function SalesView({ range, storeId, stores = [] }) {
             <tr>
               <th>Товар</th>
               <th className="ta-r">Штук</th>
+              <th className="ta-r">Коробок</th>
               <th className="ta-r">Выручка</th>
               <th className="ta-r">Наценка</th>
               <th className="ta-r">Отказов</th>
@@ -768,6 +792,18 @@ export default function SalesView({ range, storeId, stores = [] }) {
                   </div>
                 </td>
                 <td className="num ta-r">{p.qty}</td>
+                <td className="num ta-r">
+                  {p.boxes === null ? (
+                    <span className="t-faint" title="артикул не привязан к изделию склада — сколько мест, неизвестно">—</span>
+                  ) : (
+                    <>
+                      {p.boxes}
+                      {p.boxesPerUnit > 1 && (
+                        <div className="t-faint" style={{ fontSize: 12 }}>по {p.boxesPerUnit}</div>
+                      )}
+                    </>
+                  )}
+                </td>
                 <td className="num ta-r">
                   {money(p.revenue)}
                   <div className="t-faint" style={{ fontSize: 12 }}>по {money(p.avgPrice)}</div>
@@ -842,6 +878,19 @@ function CategoryRow({ category: c, products, open, onToggle }) {
           <span className="share-bar" style={{ '--fill': `${c.share}%` }}>{pct(c.share)}</span>
         </td>
         <td className="num ta-r">{c.qty}</td>
+        <td className="num ta-r">
+          {c.qtyBoxed === 0 ? (
+            <span className="t-faint" title="ни один артикул категории не привязан к изделию склада">—</span>
+          ) : (
+            <>
+              {c.boxes}
+              {/* Мест посчитано не по всей категории - говорим, по какой её части */}
+              {c.qtyBoxed < c.qty && (
+                <div className="t-faint" style={{ fontSize: 12 }}>за {c.qtyBoxed} из {c.qty} шт</div>
+              )}
+            </>
+          )}
+        </td>
         <td className="num ta-r t-dim">{c.positions}</td>
         <td className="num ta-r">{money(c.avgPrice)}</td>
         <td className="num ta-r t-dim">{pct(c.cancelShare)}</td>
@@ -849,7 +898,7 @@ function CategoryRow({ category: c, products, open, onToggle }) {
       </tr>
       {open && (
         <tr>
-          <td colSpan={8} style={{ paddingTop: 0 }}>
+          <td colSpan={9} style={{ paddingTop: 0 }}>
             <div className="product-orders">
               {products.length === 0 ? (
                 <p className="t-dim" style={{ margin: '6px 0' }}>Позиций в категории не нашлось.</p>
@@ -859,6 +908,7 @@ function CategoryRow({ category: c, products, open, onToggle }) {
                     <tr>
                       <th>Товар</th>
                       <th className="ta-r">Штук</th>
+                      <th className="ta-r">Коробок</th>
                       <th className="ta-r">Выручка</th>
                       <th className="ta-r">Доля в категории</th>
                       <th className="ta-r">Наценка</th>
@@ -880,6 +930,9 @@ function CategoryRow({ category: c, products, open, onToggle }) {
                           </div>
                         </td>
                         <td className="num ta-r">{p.qty}</td>
+                        <td className="num ta-r">
+                          {p.boxes === null ? <span className="t-faint">—</span> : p.boxes}
+                        </td>
                         <td className="num ta-r">{money(p.revenue)}</td>
                         <td className="num ta-r t-dim">
                           {c.revenue > 0 ? pct(Math.round((p.revenue / c.revenue) * 1000) / 10) : '—'}
